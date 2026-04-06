@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn>=0.34
+sqlalchemy>=2.0
+akshare>=1.16
+pandas>=2.3.2
+pandas-ta>=0.4.71b0
+pydantic>=2.11
+python-dotenv>=1.1
+httpx>=0.28
