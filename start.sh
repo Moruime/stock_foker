@@ -6,7 +6,9 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 PID_DIR="$ROOT_DIR/.pids"
+LOG_DIR="$ROOT_DIR/logs"
 mkdir -p "$PID_DIR"
+mkdir -p "$LOG_DIR"
 
 echo "=== Stock Foker 启动 ==="
 
@@ -45,7 +47,7 @@ fi
 
 echo "[后端] 启动 FastAPI 服务 (端口 8000)..."
 cd "$BACKEND_DIR"
-nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$ROOT_DIR/.pids/backend.log" 2>&1 &
+nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$LOG_DIR/backend.log" 2>&1 &
 echo $! > "$PID_DIR/backend.pid"
 echo "[后端] 已启动 (PID: $!)"
 
@@ -82,7 +84,7 @@ fi
 
 echo "[前端] 启动 Vite 开发服务器 (端口 5173)..."
 cd "$FRONTEND_DIR"
-nohup npx vite --host 127.0.0.1 --port 5173 > "$ROOT_DIR/.pids/frontend.log" 2>&1 &
+nohup npx vite --host 127.0.0.1 --port 5173 > "$LOG_DIR/frontend.log" 2>&1 &
 echo $! > "$PID_DIR/frontend.pid"
 echo "[前端] 已启动 (PID: $!)"
 
@@ -109,4 +111,4 @@ echo ""
 echo "=== 启动完成 ==="
 echo "前端: http://127.0.0.1:5173"
 echo "后端: http://127.0.0.1:8000"
-echo "日志: $PID_DIR/backend.log, $PID_DIR/frontend.log"
+echo "日志: $LOG_DIR/backend.log, $LOG_DIR/frontend.log"
