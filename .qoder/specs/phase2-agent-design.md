@@ -8,7 +8,7 @@
 
 ## 架构总览
 
-```
+```text
 前端 (3个新页面 + 增强AnalysisPage + 设置页)
           │ HTTP
 后端 agent_router.py
@@ -34,6 +34,7 @@
 **文件**: `doc/产品设计文档.md`
 
 在第 5 章版本规划的 5.2 第二阶段后新增 `第7章 Agent 链路设计` 章节，包含:
+
 - Agent 架构总览图
 - LLM 抽象层设计说明
 - 4 个 Agent 的输入输出定义
@@ -43,6 +44,7 @@
 ### Step 2: LLM 抽象层
 
 **新建文件**:
+
 - `backend/.env.example` — LLM 配置模板（LLM_ENABLED, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL 等），预留 key 占位符
 - `backend/app/llm/__init__.py`
 - `backend/app/llm/config.py` — 用 python-dotenv 从 `.env` 读取配置，封装为 LLMConfig dataclass
@@ -54,12 +56,15 @@
 ### Step 3: Agent 基类与 4 个 Agent
 
 **新建文件**:
+
 - `backend/app/agents/__init__.py`
 - `backend/app/agents/base_agent.py` — 抽象基类，Template Method 模式:
-  ```
+
+  ```text
   execute() → fetch_data() → build_prompt() → call_llm() → parse_response()
                                                          ↘ fallback() (LLM不可用时)
   ```
+
   统一返回 AgentResult(agent_name, status, data, llm_used, timestamp)
 
 - `backend/app/agents/sentiment_agent.py` — 消息面情绪分析
@@ -85,6 +90,7 @@
 ### Step 4: 数据获取服务
 
 **新建文件**:
+
 - `backend/app/services/data_fetcher.py` — 封装所有新数据源:
   - `fetch_stock_news(stock_code)` — 个股新闻
   - `fetch_industry_board(stock_code)` — 所属行业板块
@@ -97,12 +103,14 @@
 ### Step 5: 数据模型与 API Schema
 
 **修改文件**:
+
 - `backend/app/models/models.py` — 新增 AgentResultCache 模型（agent_name, stock_code, result_json, status, llm_used, created_at）
 - `backend/app/models/schemas.py` — 新增 AgentResultResponse, SentimentAnalysis, SectorAnalysis, MacroAnalysis, EnhancedAdvice 等 Pydantic Schema
 
 ### Step 6: API 路由
 
 **新建文件**:
+
 - `backend/app/routers/agent_router.py`:
   - `GET /api/agents/sentiment/{stock_code}` — 消息面分析
   - `GET /api/agents/sector/{stock_code}` — 板块联动分析
@@ -111,23 +119,27 @@
   - `GET /api/agents/status` — Agent系统状态（LLM是否可用）
 
 **修改文件**:
+
 - `backend/app/main.py` — 注册 agent_router，启动时加载 .env
 
 ### Step 7: 前端类型和 API
 
 **修改文件**:
+
 - `frontend/src/types/index.ts` — 新增 AgentResult, SentimentAnalysis, SectorAnalysis, MacroAnalysis, EnhancedAdvice 等 TypeScript 接口
 - `frontend/src/services/api.ts` — 新增 6 个 API 函数
 
 ### Step 8: 前端新页面
 
 **新建文件**:
+
 - `frontend/src/pages/SentimentPage.tsx` — 消息面分析页（情绪仪表盘 + 新闻时间线 + AI分析总结）
 - `frontend/src/pages/SectorPage.tsx` — 板块联动页（板块排名 + 个股相对强弱 + 概念板块 + AI分析）
 - `frontend/src/pages/MacroPage.tsx` — 宏观环境页（大盘走势 + 宏观指标卡片 + 市场阶段标签 + AI分析）
 - `frontend/src/pages/SettingsPage.tsx` — 设置页（LLM配置表单 + 连接测试）
 
 **修改文件**:
+
 - `frontend/src/components/MainLayout.tsx` — 侧边栏新增菜单分组（分析/记录/系统）
 - `frontend/src/App.tsx` — 新增4个路由
 - `frontend/src/pages/AnalysisPage.tsx` — 增强：增加四维雷达图(ECharts radar) + AI综合建议展示区
