@@ -91,14 +91,18 @@ def _get_kline_sina(stock_code: str, period: str, datalen: int = 300) -> list[di
     raw = json.loads(match.group(1))
     records = []
     for item in raw:
+        o, c, h, l = float(item["open"]), float(item["close"]), float(item["high"]), float(item["low"])
+        vol = float(item["volume"])
+        # 新浪不返回成交额，用均价*成交量估算
+        avg_price = (o + c + h + l) / 4
         records.append({
             "date": item["day"],
-            "open": float(item["open"]),
-            "close": float(item["close"]),
-            "high": float(item["high"]),
-            "low": float(item["low"]),
-            "volume": float(item["volume"]),
-            "turnover": 0.0,
+            "open": o,
+            "close": c,
+            "high": h,
+            "low": l,
+            "volume": vol,
+            "turnover": round(avg_price * vol, 2),
         })
     return records
 
@@ -107,13 +111,14 @@ def _get_kline_akshare(
     stock_code: str, period: str, start_date: str, end_date: str,
 ) -> list[dict]:
     """通过 AKShare(东方财富) 获取K线数据"""
-    df = _retry_call(lambda: ak.stock_zh_a_hist(
+    df = ak.stock_zh_a_hist(
         symbol=stock_code,
         period=period,
         start_date=start_date,
         end_date=end_date,
         adjust="qfq",
-    ))
+        timeout=8,
+    )
     records = []
     for _, row in df.iterrows():
         records.append({
@@ -123,7 +128,7 @@ def _get_kline_akshare(
             "high": float(row["最高"]),
             "low": float(row["最低"]),
             "volume": float(row["成交量"]),
-            "turnover": float(row.get("换手率", 0)),
+            "turnover": float(row.get("成交额", 0)),
         })
     return records
 
@@ -238,16 +243,23 @@ def _get_kline_with_cache(stock_code: str, period: str, db) -> list[dict]:
 
 
 def _fetch_remote_kline(stock_code: str, period: str) -> list[dict]:
-    """从远程获取K线数据，新浪优先，AKShare降级"""
-    try:
-        return _retry_call(lambda: _get_kline_sina(stock_code, period))
-    except Exception:
-        pass
-
+    """从远程获取K线数据，AKShare优先（含成交额），新浪降级"""
+    import logging
+    logger = logging.getLogger(__name__)
     start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
     end_date = datetime.now().strftime("%Y%m%d")
     try:
-        return _get_kline_akshare(stock_code, period, start_date, end_date)
+        # AKShare 单次尝试，不重试，快速降级
+        data = _get_kline_akshare(stock_code, period, start_date, end_date)
+        logger.info("K线数据来源: AKShare, records=%d", len(data))
+        return data
+    except Exception as e:
+        logger.warning("AKShare获取失败: %s, 降级到新浪", e)
+
+    try:
+        data = _retry_call(lambda: _get_kline_sina(stock_code, period))
+        logger.info("K线数据来源: 新浪, records=%d", len(data))
+        return data
     except Exception as e:
         raise RuntimeError(f"获取K线数据失败: {e}")
 

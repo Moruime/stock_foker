@@ -57,7 +57,7 @@ export const createTradeRecord = (data: TradeRecordCreate) =>
 
 export const updateTradeRecord = (
   id: number,
-  data: { actual_result?: number; result_note?: string },
+  data: Record<string, unknown>,
 ) => api.put<TradeRecord>(`/trades/${id}`, data).then((r) => r.data);
 
 export const deleteTradeRecord = (id: number) =>

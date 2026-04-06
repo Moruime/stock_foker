@@ -99,7 +99,9 @@ export default function AnalysisPage() {
       if (!dz) return;
       dragRef.current = { dragging: true, startX: e.clientX, zoomStart: dz.start, zoomEnd: dz.end };
       wrapper.style.cursor = 'grabbing';
-      e.preventDefault(); // 阻止选中文字等默认行为
+      inst.dispatchAction({ type: 'hideTip' });
+      e.stopPropagation();
+      e.preventDefault();
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -122,14 +124,14 @@ export default function AnalysisPage() {
 
     wrapper.style.cursor = 'grab';
     wrapper.addEventListener('wheel', onWheel, { passive: false });
-    wrapper.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    wrapper.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('mousemove', onMouseMove, true);
+    document.addEventListener('mouseup', onMouseUp, true);
     return () => {
       wrapper.removeEventListener('wheel', onWheel);
-      wrapper.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      wrapper.removeEventListener('mousedown', onMouseDown, true);
+      document.removeEventListener('mousemove', onMouseMove, true);
+      document.removeEventListener('mouseup', onMouseUp, true);
     };
   }, [analysis]); // 重新绑定当 analysis 变化（图表重建）
 
@@ -150,6 +152,39 @@ export default function AnalysisPage() {
       axisPointer: { type: 'cross' as const },
       triggerOn: 'mousemove' as const,
       ...chartDarkOption.tooltip,
+      formatter: (params: { seriesName: string; value: number | number[]; dataIndex: number; color: string }[]) => {
+        if (!params || params.length === 0) return '';
+        const idx = params[0].dataIndex;
+        const d = kline_data[idx];
+        if (!d) return '';
+        const change = d.close - d.open;
+        const changePct = d.open !== 0 ? ((change / d.open) * 100).toFixed(2) : '0.00';
+        const color = change >= 0 ? COLORS.stockUp : COLORS.stockDown;
+        const sign = change >= 0 ? '+' : '';
+        const vol = d.volume >= 10000 ? `${(d.volume / 10000).toFixed(1)}万` : `${d.volume}`;
+        const amt = d.turnover != null && d.turnover > 0
+          ? (d.turnover >= 1e8 ? `${(d.turnover / 1e8).toFixed(2)}亿` : d.turnover >= 1e4 ? `${(d.turnover / 1e4).toFixed(1)}万` : `${d.turnover.toFixed(0)}`)
+          : '--';
+
+        let html = `<div style="font-size:12px;line-height:1.8">`;
+        html += `<div style="font-weight:600;margin-bottom:4px">${d.date}</div>`;
+        html += `<div>开盘: <span style="color:${color};float:right;margin-left:12px">${d.open.toFixed(2)}</span></div>`;
+        html += `<div>收盘: <span style="color:${color};float:right;margin-left:12px">${d.close.toFixed(2)}</span></div>`;
+        html += `<div>最高: <span style="float:right;margin-left:12px">${d.high.toFixed(2)}</span></div>`;
+        html += `<div>最低: <span style="float:right;margin-left:12px">${d.low.toFixed(2)}</span></div>`;
+        html += `<div>涨跌: <span style="color:${color};float:right;margin-left:12px">${sign}${change.toFixed(2)} (${sign}${changePct}%)</span></div>`;
+        html += `<div>成交量: <span style="float:right;margin-left:12px">${vol}</span></div>`;
+        html += `<div>成交额: <span style="float:right;margin-left:12px">${amt}</span></div>`;
+
+        // 均线数据
+        for (const p of params) {
+          if (p.seriesName.startsWith('MA') && typeof p.value === 'number' && p.value != null) {
+            html += `<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>${p.seriesName}: <span style="float:right;margin-left:12px">${p.value.toFixed(2)}</span></div>`;
+          }
+        }
+        html += `</div>`;
+        return html;
+      },
     },
     legend: {
       data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'],
@@ -304,7 +339,7 @@ export default function AnalysisPage() {
         <div ref={wrapperRef} style={{ userSelect: 'none' }}>
           <ReactECharts
             option={klineOption}
-            style={{ height: 500, pointerEvents: 'none' }}
+            style={{ height: 500 }}
             onChartReady={onChartReady}
           />
         </div>

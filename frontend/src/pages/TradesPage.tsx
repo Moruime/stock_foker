@@ -33,9 +33,9 @@ export default function TradesPage() {
   const [records, setRecords] = useState<TradeRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [resultModal, setResultModal] = useState<TradeRecord | null>(null);
+  const [editRecord, setEditRecord] = useState<TradeRecord | null>(null);
   const [form] = Form.useForm();
-  const [resultForm] = Form.useForm();
+  const [editForm] = Form.useForm();
   const [positionKey, setPositionKey] = useState(0);
 
   const loadRecords = () => {
@@ -78,17 +78,29 @@ export default function TradesPage() {
     }
   };
 
-  const handleUpdateResult = async () => {
-    if (!resultModal) return;
+  const handleEdit = async () => {
+    if (!editRecord) return;
+    let values;
     try {
-      const values = await resultForm.validateFields();
-      await updateTradeRecord(resultModal.id, values);
-      message.success('结果已更新');
-      setResultModal(null);
-      resultForm.resetFields();
-      loadRecords();
+      values = await editForm.validateFields();
     } catch {
-      // validation failed
+      return;
+    }
+    try {
+      const payload: Record<string, unknown> = { ...values };
+      if (values.traded_at) {
+        payload.traded_at = values.traded_at.toISOString();
+      }
+      await updateTradeRecord(editRecord.id, payload);
+      message.success('记录已更新');
+      setEditRecord(null);
+      editForm.resetFields();
+      loadRecords();
+      setPositionKey((k) => k + 1);
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || '更新失败，请重试');
     }
   };
 
@@ -163,14 +175,22 @@ export default function TradesPage() {
             size="small"
             icon={<EditOutlined />}
             onClick={() => {
-              setResultModal(record);
-              resultForm.setFieldsValue({
+              setEditRecord(record);
+              editForm.setFieldsValue({
+                trade_type: record.trade_type,
+                price: record.price,
+                quantity: record.quantity,
+                traded_at: dayjs(record.traded_at),
+                reason: record.reason,
+                market_sentiment: record.market_sentiment,
+                target_price: record.target_price,
+                expected_hold_days: record.expected_hold_days,
                 actual_result: record.actual_result,
                 result_note: record.result_note,
               });
             }}
           >
-            结果
+            编辑
           </Button>
           <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />} />
@@ -265,19 +285,52 @@ export default function TradesPage() {
         </Form>
       </Modal>
 
-      {/* 补充结果弹窗 */}
+      {/* 编辑记录弹窗 */}
       <Modal
-        title="补充交易结果"
-        open={!!resultModal}
-        onOk={handleUpdateResult}
-        onCancel={() => setResultModal(null)}
+        title="编辑交易记录"
+        open={!!editRecord}
+        onOk={handleEdit}
+        onCancel={() => { setEditRecord(null); editForm.resetFields(); }}
+        width={600}
+        destroyOnClose
       >
-        <Form form={resultForm} layout="vertical">
+        <Form form={editForm} layout="vertical">
+          <Form.Item name="trade_type" label="操作类型" rules={[{ required: true }]}>
+            <Select options={[{ value: 'buy', label: '买入' }, { value: 'sell', label: '卖出' }]} />
+          </Form.Item>
+          <Form.Item name="price" label="成交价格" rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%' }} min={0} step={0.01} />
+          </Form.Item>
+          <Form.Item name="quantity" label="成交数量" rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%' }} min={1} step={100} />
+          </Form.Item>
+          <Form.Item name="traded_at" label="成交日期" rules={[{ required: true }]}>
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="reason" label="买入/卖出理由">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="market_sentiment" label="当时市场情绪判断">
+            <Select
+              allowClear
+              options={[
+                { value: 'optimistic', label: '乐观' },
+                { value: 'neutral', label: '中性' },
+                { value: 'pessimistic', label: '悲观' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="target_price" label="目标价位">
+            <InputNumber style={{ width: '100%' }} min={0} step={0.01} />
+          </Form.Item>
+          <Form.Item name="expected_hold_days" label="预期持有天数">
+            <InputNumber style={{ width: '100%' }} min={1} />
+          </Form.Item>
           <Form.Item name="actual_result" label="实际盈亏金额">
             <InputNumber style={{ width: '100%' }} step={0.01} />
           </Form.Item>
           <Form.Item name="result_note" label="结果备注">
-            <Input.TextArea rows={3} />
+            <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
       </Modal>

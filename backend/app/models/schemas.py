@@ -42,6 +42,14 @@ class TradeRecordCreate(BaseModel):
 
 
 class TradeRecordUpdate(BaseModel):
+    trade_type: Optional[TradeType] = None
+    price: Optional[float] = None
+    quantity: Optional[int] = None
+    reason: Optional[str] = None
+    market_sentiment: Optional[MarketSentiment] = None
+    target_price: Optional[float] = None
+    expected_hold_days: Optional[int] = None
+    traded_at: Optional[datetime] = None
     actual_result: Optional[float] = None
     result_note: Optional[str] = None
 
