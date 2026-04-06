@@ -13,12 +13,14 @@ import {
   Row,
   Col,
   Tooltip,
+  Button,
+  List,
 } from 'antd';
-import { QuestionCircleOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined, RobotOutlined, ReloadOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
-import { getStockAnalysis } from '../services/api';
-import type { FocusStock, StockAnalysis } from '../types';
+import { getStockAnalysis, runEnhancedAnalysis } from '../services/api';
+import type { FocusStock, StockAnalysis, EnhancedAnalysis } from '../types';
 import { COLORS, chartDarkOption } from '../theme';
 import { INDICATOR_MAP } from '../constants/indicators';
 import PositionCard from '../components/PositionCard';
@@ -42,6 +44,8 @@ export default function AnalysisPage() {
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [aiAnalysis, setAiAnalysis] = useState<EnhancedAnalysis | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     if (!focus) return;
@@ -52,6 +56,15 @@ export default function AnalysisPage() {
       .catch((e) => setError(e.response?.data?.detail || '加载失败'))
       .finally(() => setLoading(false));
   }, [focus, period]);
+
+  const handleAiAnalysis = useCallback(() => {
+    if (!focus) return;
+    setAiLoading(true);
+    runEnhancedAnalysis(focus.stock_code, focus.stock_name)
+      .then(setAiAnalysis)
+      .catch(() => { /* silently fail, user can retry */ })
+      .finally(() => setAiLoading(false));
+  }, [focus]);
 
   const chartInstance = useRef<ECharts | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -415,6 +428,131 @@ export default function AnalysisPage() {
           </Card>
         </Col>
       </Row>
+
+      {/* AI 综合分析 */}
+      <Card
+        title={
+          <Space>
+            <RobotOutlined />
+            <span>AI 综合分析</span>
+            {aiAnalysis?.enhanced_advice?.llm_used && <Tag color="blue">AI</Tag>}
+            {aiAnalysis?.enhanced_advice && !aiAnalysis.enhanced_advice.llm_used && <Tag>规则</Tag>}
+          </Space>
+        }
+        size="small"
+        style={{ marginTop: 16 }}
+        extra={
+          <Button
+            icon={aiAnalysis ? <ReloadOutlined /> : <RobotOutlined />}
+            onClick={handleAiAnalysis}
+            loading={aiLoading}
+            type={aiAnalysis ? 'default' : 'primary'}
+          >
+            {aiAnalysis ? '刷新' : '开始分析'}
+          </Button>
+        }
+      >
+        {aiLoading && <Spin tip="AI 分析中，请稍候..." style={{ display: 'block', margin: '24px auto' }} />}
+
+        {!aiLoading && !aiAnalysis && (
+          <Empty description="点击「开始分析」运行 AI 四维度综合分析" />
+        )}
+
+        {!aiLoading && aiAnalysis && (() => {
+          const ea = aiAnalysis.enhanced_advice.data;
+          const ds = (ea.dimension_scores as Record<string, number>) || {};
+          const radarData = [
+            ds.technical ?? 0,
+            ds.sentiment ?? 0,
+            ds.sector ?? 0,
+            ds.macro ?? 0,
+          ];
+          const hasRadarData = radarData.some((v) => v !== 0);
+
+          const aiSignal = (ea.signal as string) || 'hold';
+          const aiConfidence = (ea.confidence as number) || 0;
+          const aiReasoning = (ea.reasoning as string[]) || [];
+          const riskWarnings = (ea.risk_warnings as string[]) || [];
+          const positionAdvice = ea.position_advice as string;
+          const summary = (ea.summary as string) || '';
+
+          const aiSignalColor = aiSignal === 'buy' ? 'red' : aiSignal === 'sell' ? 'green' : 'default';
+          const aiSignalText = aiSignal === 'buy' ? '买入' : aiSignal === 'sell' ? '卖出' : '持有观望';
+
+          const radarOption = {
+            backgroundColor: 'transparent',
+            radar: {
+              indicator: [
+                { name: '技术面', max: 100 },
+                { name: '消息面', max: 100 },
+                { name: '板块', max: 100 },
+                { name: '宏观', max: 100 },
+              ],
+              shape: 'polygon' as const,
+              axisName: { color: COLORS.textSecondary },
+              splitArea: { areaStyle: { color: ['rgba(77,171,247,0.03)', 'rgba(77,171,247,0.06)'] } },
+              splitLine: { lineStyle: { color: COLORS.borderSubtle } },
+              axisLine: { lineStyle: { color: COLORS.border } },
+            },
+            series: [{
+              type: 'radar',
+              data: [{
+                value: radarData,
+                name: '四维评分',
+                areaStyle: { color: 'rgba(77,171,247,0.25)' },
+                lineStyle: { color: COLORS.primary },
+                itemStyle: { color: COLORS.primary },
+              }],
+            }],
+          };
+
+          return (
+            <Row gutter={16}>
+              <Col span={8}>
+                {hasRadarData ? (
+                  <ReactECharts option={radarOption} style={{ height: 260 }} />
+                ) : (
+                  <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Text type="secondary">AI 未启用，无评分数据</Text>
+                  </div>
+                )}
+                <div style={{ textAlign: 'center', marginTop: 8 }}>
+                  <Space>
+                    <Tag color={aiSignalColor} style={{ fontSize: 16, padding: '4px 16px' }}>{aiSignalText}</Tag>
+                    <Text type="secondary">置信度: {(aiConfidence * 100).toFixed(0)}%</Text>
+                  </Space>
+                </div>
+              </Col>
+              <Col span={16}>
+                {summary && (
+                  <Alert message={summary} type="info" style={{ marginBottom: 12 }} />
+                )}
+                {aiReasoning.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <Text strong>分析依据:</Text>
+                    <List
+                      size="small"
+                      dataSource={aiReasoning}
+                      renderItem={(item) => <List.Item style={{ padding: '4px 0' }}>{item}</List.Item>}
+                    />
+                  </div>
+                )}
+                {riskWarnings.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <Text strong style={{ color: COLORS.warning }}>风险提示:</Text>
+                    {riskWarnings.map((w, i) => (
+                      <Alert key={i} message={w} type="warning" showIcon style={{ marginTop: 4 }} />
+                    ))}
+                  </div>
+                )}
+                {positionAdvice && (
+                  <Alert message={`仓位建议: ${positionAdvice}`} type="success" style={{ marginTop: 8 }} />
+                )}
+              </Col>
+            </Row>
+          );
+        })()}
+      </Card>
     </div>
   );
 }

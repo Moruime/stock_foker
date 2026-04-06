@@ -80,6 +80,24 @@ class KlineCache(Base):
     turnover = Column(Float, default=0)
 
 
+class AgentResultCache(Base):
+    """Agent 结果缓存"""
+    __tablename__ = "agent_result_cache"
+    __table_args__ = (
+        UniqueConstraint("agent_name", "stock_code", "cache_key", name="uq_agent_cache"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_name = Column(String(50), nullable=False, index=True)
+    stock_code = Column(String(10), nullable=False, index=True)
+    cache_key = Column(String(100), nullable=False)  # 如日期 "2026-04-06"
+    status = Column(String(20), nullable=False)  # success / degraded / error
+    llm_used = Column(Integer, default=0)
+    data = Column(Text, nullable=False)  # JSON 序列化
+    error_message = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class StockPosition(Base):
     """股票持仓信息"""
     __tablename__ = "stock_positions"

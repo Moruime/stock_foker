@@ -6,6 +6,10 @@ import MainLayout from './components/MainLayout';
 import AnalysisPage from './pages/AnalysisPage';
 import TradesPage from './pages/TradesPage';
 import ProfilePage from './pages/ProfilePage';
+import SentimentPage from './pages/SentimentPage';
+import SectorPage from './pages/SectorPage';
+import MacroPage from './pages/MacroPage';
+import SettingsPage from './pages/SettingsPage';
 
 function App() {
   return (
@@ -17,6 +21,10 @@ function App() {
             <Route path="analysis" element={<AnalysisPage />} />
             <Route path="trades" element={<TradesPage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="sentiment" element={<SentimentPage />} />
+            <Route path="sector" element={<SectorPage />} />
+            <Route path="macro" element={<MacroPage />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

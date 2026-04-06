@@ -128,3 +128,33 @@ export interface PositionUpdate {
   stop_loss_price?: number;
   note?: string;
 }
+
+// --- Agent Types ---
+export interface AgentResult {
+  agent_name: string;
+  status: 'success' | 'degraded' | 'error';
+  data: Record<string, unknown>;
+  llm_used: boolean;
+  timestamp: string;
+  error_message?: string;
+}
+
+export interface EnhancedAnalysis {
+  sentiment: AgentResult;
+  sector: AgentResult;
+  macro: AgentResult;
+  enhanced_advice: AgentResult;
+}
+
+export interface LLMStatus {
+  enabled: boolean;
+  available: boolean;
+  provider: string;
+  api_key: string;
+  base_url: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  timeout: number;
+  enable_thinking: boolean;
+}

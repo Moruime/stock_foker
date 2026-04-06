@@ -9,6 +9,9 @@ import type {
   Position,
   PositionCreate,
   PositionUpdate,
+  AgentResult,
+  EnhancedAnalysis,
+  LLMStatus,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -81,3 +84,36 @@ export const updatePosition = (stockCode: string, data: PositionUpdate) =>
 
 export const deletePosition = (stockCode: string) =>
   api.delete(`/positions/${stockCode}`).then((r) => r.data);
+
+// --- Agent ---
+export const runSentimentAgent = (stockCode: string, stockName: string) =>
+  api
+    .post<AgentResult>('/agent/sentiment', { stock_code: stockCode, stock_name: stockName })
+    .then((r) => r.data);
+
+export const runSectorAgent = (stockCode: string, stockName: string) =>
+  api
+    .post<AgentResult>('/agent/sector', { stock_code: stockCode, stock_name: stockName })
+    .then((r) => r.data);
+
+export const runMacroAgent = (stockCode: string, stockName: string) =>
+  api
+    .post<AgentResult>('/agent/macro', { stock_code: stockCode, stock_name: stockName })
+    .then((r) => r.data);
+
+export const runEnhancedAnalysis = (stockCode: string, stockName: string) =>
+  api
+    .post<EnhancedAnalysis>('/agent/enhanced-analysis', {
+      stock_code: stockCode,
+      stock_name: stockName,
+    })
+    .then((r) => r.data);
+
+export const getLLMStatus = () =>
+  api.get<LLMStatus>('/agent/llm-status').then((r) => r.data);
+
+export const reloadLLMConfig = () =>
+  api.post<LLMStatus>('/agent/reload-config').then((r) => r.data);
+
+export const clearAgentCache = (stockCode: string) =>
+  api.delete(`/agent/cache/${stockCode}`).then((r) => r.data);

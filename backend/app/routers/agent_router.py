@@ -1,0 +1,256 @@
+"""Agent API 路由 — 消息面 / 板块 / 宏观 / 综合分析 / LLM 状态。"""
+
+from __future__ import annotations
+
+import json
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.models.models import AgentResultCache, FocusStock
+from app.models.schemas import (
+    AgentResultResponse,
+    AgentRunRequest,
+    EnhancedAnalysisResponse,
+    LLMStatusResponse,
+)
+from app.agents.sentiment_agent import SentimentAgent
+from app.agents.sector_agent import SectorAgent
+from app.agents.macro_agent import MacroAgent
+from app.agents.enhanced_advice_agent import EnhancedAdviceAgent
+from app.llm.client import get_llm_client, reload_llm_client
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+
+# ------------------------------------------------------------------
+# 工具函数
+# ------------------------------------------------------------------
+
+def _cache_key_today() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _get_cached(db: Session, agent_name: str, stock_code: str) -> dict | None:
+    """查询当天缓存。LLM 可用但缓存为降级结果时跳过缓存。"""
+    row = db.query(AgentResultCache).filter(
+        AgentResultCache.agent_name == agent_name,
+        AgentResultCache.stock_code == stock_code,
+        AgentResultCache.cache_key == _cache_key_today(),
+    ).first()
+    if row:
+        # LLM 现在可用但缓存是未使用 LLM 的降级结果 → 跳过缓存重新分析
+        if not row.llm_used and get_llm_client().is_available():
+            return None
+        return {
+            "agent_name": row.agent_name,
+            "status": row.status,
+            "data": json.loads(row.data),
+            "llm_used": bool(row.llm_used),
+            "timestamp": row.created_at.isoformat() if row.created_at else "",
+            "error_message": row.error_message,
+        }
+    return None
+
+
+def _save_cache(db: Session, result: dict, stock_code: str) -> None:
+    """写入或更新缓存。"""
+    agent_name = result["agent_name"]
+    cache_key = _cache_key_today()
+    existing = db.query(AgentResultCache).filter(
+        AgentResultCache.agent_name == agent_name,
+        AgentResultCache.stock_code == stock_code,
+        AgentResultCache.cache_key == cache_key,
+    ).first()
+    if existing:
+        existing.status = result["status"]
+        existing.llm_used = int(result["llm_used"])
+        existing.data = json.dumps(result["data"], ensure_ascii=False)
+        existing.error_message = result.get("error_message")
+    else:
+        row = AgentResultCache(
+            agent_name=agent_name,
+            stock_code=stock_code,
+            cache_key=cache_key,
+            status=result["status"],
+            llm_used=int(result["llm_used"]),
+            data=json.dumps(result["data"], ensure_ascii=False),
+            error_message=result.get("error_message"),
+        )
+        db.add(row)
+    db.commit()
+
+
+def _run_agent(agent, **kwargs) -> dict:
+    """执行单个 Agent 并返回 dict。"""
+    return agent.execute(**kwargs).to_dict()
+
+
+# ------------------------------------------------------------------
+# 单 Agent 端点
+# ------------------------------------------------------------------
+
+@router.post("/sentiment", response_model=AgentResultResponse)
+def run_sentiment(req: AgentRunRequest, db: Session = Depends(get_db)):
+    """消息面情绪分析。"""
+    cached = _get_cached(db, "sentiment", req.stock_code)
+    if cached:
+        return cached
+    result = _run_agent(
+        SentimentAgent(),
+        stock_code=req.stock_code,
+        stock_name=req.stock_name,
+    )
+    _save_cache(db, result, req.stock_code)
+    return result
+
+
+@router.post("/sector", response_model=AgentResultResponse)
+def run_sector(req: AgentRunRequest, db: Session = Depends(get_db)):
+    """板块联动分析。"""
+    cached = _get_cached(db, "sector", req.stock_code)
+    if cached:
+        return cached
+    result = _run_agent(
+        SectorAgent(),
+        stock_code=req.stock_code,
+        stock_name=req.stock_name,
+    )
+    _save_cache(db, result, req.stock_code)
+    return result
+
+
+@router.post("/macro", response_model=AgentResultResponse)
+def run_macro(req: AgentRunRequest, db: Session = Depends(get_db)):
+    """宏观环境分析。"""
+    cached = _get_cached(db, "macro", req.stock_code)
+    if cached:
+        return cached
+    result = _run_agent(MacroAgent(), stock_code=req.stock_code, stock_name=req.stock_name)
+    _save_cache(db, result, req.stock_code)
+    return result
+
+
+# ------------------------------------------------------------------
+# 综合分析（链路端点）
+# ------------------------------------------------------------------
+
+@router.post("/enhanced-analysis", response_model=EnhancedAnalysisResponse)
+def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
+    """综合 AI 分析 — 并行运行 3 个上游 Agent，再运行增强建议 Agent。"""
+    stock_code = req.stock_code
+    stock_name = req.stock_name
+
+    # 1. 并行执行上游 3 个 Agent（优先用缓存）
+    upstream_results: dict[str, dict] = {}
+    agents_to_run: dict[str, tuple] = {}
+
+    for name, cls in [("sentiment", SentimentAgent), ("sector", SectorAgent), ("macro", MacroAgent)]:
+        cached = _get_cached(db, name, stock_code)
+        if cached:
+            upstream_results[name] = cached
+        else:
+            agents_to_run[name] = (cls(),)
+
+    if agents_to_run:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(
+                    _run_agent,
+                    agent_tuple[0],
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                ): name
+                for name, agent_tuple in agents_to_run.items()
+            }
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    result = future.result()
+                    upstream_results[name] = result
+                    _save_cache(db, result, stock_code)
+                except Exception as e:
+                    logger.error("Agent %s 执行异常: %s", name, e)
+                    upstream_results[name] = {
+                        "agent_name": name,
+                        "status": "error",
+                        "data": {},
+                        "llm_used": False,
+                        "timestamp": datetime.now().isoformat(),
+                        "error_message": str(e),
+                    }
+
+    # 2. 获取 K 线数据和技术指标（用于增强建议）
+    from app.services.stock_service import get_kline_data, calculate_indicators
+
+    try:
+        kline = get_kline_data(stock_code, "daily", db=db)
+        indicators = calculate_indicators(kline)
+    except Exception as e:
+        logger.warning("获取K线/指标失败: %s", e)
+        kline = []
+        indicators = {}
+
+    # 3. 运行增强建议 Agent
+    enhanced_result = _run_agent(
+        EnhancedAdviceAgent(),
+        stock_code=stock_code,
+        stock_name=stock_name,
+        kline=kline,
+        indicators=indicators,
+        db=db,
+        sentiment_result=upstream_results.get("sentiment", {}).get("data", {}),
+        sector_result=upstream_results.get("sector", {}).get("data", {}),
+        macro_result=upstream_results.get("macro", {}).get("data", {}),
+    )
+    _save_cache(db, enhanced_result, stock_code)
+
+    return {
+        "sentiment": upstream_results.get("sentiment", {"agent_name": "sentiment", "status": "error", "data": {}, "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": "未执行"}),
+        "sector": upstream_results.get("sector", {"agent_name": "sector", "status": "error", "data": {}, "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": "未执行"}),
+        "macro": upstream_results.get("macro", {"agent_name": "macro", "status": "error", "data": {}, "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": "未执行"}),
+        "enhanced_advice": enhanced_result,
+    }
+
+
+# ------------------------------------------------------------------
+# LLM 状态
+# ------------------------------------------------------------------
+
+@router.get("/llm-status", response_model=LLMStatusResponse)
+def get_llm_status():
+    """获取 LLM 配置状态（脱敏）。"""
+    return get_llm_client().get_status()
+
+
+@router.post("/reload-config", response_model=LLMStatusResponse)
+def reload_config():
+    """重新加载 .env 中的 LLM 配置（无需重启后端）。"""
+    from dotenv import load_dotenv
+    import os
+
+    env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+    load_dotenv(os.path.abspath(env_path), override=True)
+
+    client = reload_llm_client()
+    return client.get_status()
+
+
+# ------------------------------------------------------------------
+# 清除缓存
+# ------------------------------------------------------------------
+
+@router.delete("/cache/{stock_code}")
+def clear_agent_cache(stock_code: str, db: Session = Depends(get_db)):
+    """清除指定股票的 Agent 缓存。"""
+    count = db.query(AgentResultCache).filter(
+        AgentResultCache.stock_code == stock_code,
+    ).delete()
+    db.commit()
+    return {"message": f"已清除 {count} 条缓存"}

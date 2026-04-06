@@ -20,6 +20,10 @@ import {
   StarFilled,
   CloseOutlined,
   SwapOutlined,
+  MessageOutlined,
+  AppstoreOutlined,
+  GlobalOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -37,8 +41,12 @@ const { Text, Title } = Typography;
 
 const menuItems = [
   { key: '/analysis', icon: <LineChartOutlined />, label: '行情分析' },
+  { key: '/sentiment', icon: <MessageOutlined />, label: '消息面' },
+  { key: '/sector', icon: <AppstoreOutlined />, label: '板块联动' },
+  { key: '/macro', icon: <GlobalOutlined />, label: '宏观环境' },
   { key: '/trades', icon: <UnorderedListOutlined />, label: '操作记录' },
   { key: '/profile', icon: <UserOutlined />, label: '炒股画像' },
+  { key: '/settings', icon: <SettingOutlined />, label: 'AI 设置' },
 ];
 
 export default function MainLayout() {

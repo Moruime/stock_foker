@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from app.models.models import TimeFrame, TradeType, MarketSentiment, RecordMode
 
 
@@ -161,3 +161,38 @@ class PositionResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+# --- Agent Schemas ---
+class AgentResultResponse(BaseModel):
+    agent_name: str
+    status: str  # success / degraded / error
+    data: dict[str, Any]
+    llm_used: bool
+    timestamp: str
+    error_message: Optional[str] = None
+
+
+class AgentRunRequest(BaseModel):
+    stock_code: str
+    stock_name: str
+
+
+class EnhancedAnalysisResponse(BaseModel):
+    sentiment: AgentResultResponse
+    sector: AgentResultResponse
+    macro: AgentResultResponse
+    enhanced_advice: AgentResultResponse
+
+
+class LLMStatusResponse(BaseModel):
+    enabled: bool
+    available: bool
+    provider: str
+    api_key: str
+    base_url: str
+    model: str
+    temperature: float
+    max_tokens: int
+    timeout: int
+    enable_thinking: bool
