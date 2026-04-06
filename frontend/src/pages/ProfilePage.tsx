@@ -20,8 +20,9 @@ import {
 } from '@ant-design/icons';
 import { getTradingProfile } from '../services/api';
 import type { FocusStock, TradingProfile } from '../types';
+import { COLORS } from '../theme';
 
-const { Text } = Typography;
+const { Text, Title } = Typography;
 
 export default function ProfilePage() {
   const { focus } = useOutletContext<{ focus: FocusStock | null }>();
@@ -45,7 +46,7 @@ export default function ProfilePage() {
 
   return (
     <div>
-      <h3>炒股画像</h3>
+      <Title level={5}>炒股画像</Title>
 
       <Row gutter={[16, 16]}>
         <Col span={6}>
@@ -64,7 +65,7 @@ export default function ProfilePage() {
               value={winRatePct}
               suffix="%"
               prefix={<TrophyOutlined />}
-              valueStyle={{ color: parseFloat(winRatePct) >= 50 ? '#3f8600' : '#cf1322' }}
+              valueStyle={{ color: parseFloat(winRatePct) >= 50 ? COLORS.stockUp : COLORS.stockDown }}
             />
           </Card>
         </Col>
@@ -75,7 +76,7 @@ export default function ProfilePage() {
               value={profile.profit_loss_ratio}
               precision={2}
               prefix={<FallOutlined />}
-              valueStyle={{ color: profile.profit_loss_ratio >= 1 ? '#3f8600' : '#cf1322' }}
+              valueStyle={{ color: profile.profit_loss_ratio >= 1 ? COLORS.stockUp : COLORS.stockDown }}
             />
           </Card>
         </Col>
@@ -104,11 +105,11 @@ export default function ProfilePage() {
             </p>
             <p>
               <Text type="secondary">平均盈利: </Text>
-              <Tag color="green">+{profile.avg_profit.toFixed(2)}</Tag>
+              <Tag color="red">+{profile.avg_profit.toFixed(2)}</Tag>
             </p>
             <p>
               <Text type="secondary">平均亏损: </Text>
-              <Tag color="red">{profile.avg_loss.toFixed(2)}</Tag>
+              <Tag color="green">{profile.avg_loss.toFixed(2)}</Tag>
             </p>
           </Card>
         </Col>
@@ -118,14 +119,16 @@ export default function ProfilePage() {
               <Text>胜率</Text>
               <Progress
                 percent={parseFloat(winRatePct)}
-                status={parseFloat(winRatePct) >= 50 ? 'success' : 'exception'}
+                strokeColor={parseFloat(winRatePct) >= 50 ? COLORS.stockUp : COLORS.stockDown}
+                trailColor={COLORS.borderSubtle}
               />
             </div>
             <div>
               <Text>情绪判断准确率</Text>
               <Progress
                 percent={parseFloat(sentimentPct)}
-                status={parseFloat(sentimentPct) >= 50 ? 'success' : 'exception'}
+                strokeColor={parseFloat(sentimentPct) >= 50 ? COLORS.stockUp : COLORS.stockDown}
+                trailColor={COLORS.borderSubtle}
               />
             </div>
           </Card>

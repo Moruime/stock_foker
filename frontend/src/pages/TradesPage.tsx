@@ -14,6 +14,7 @@ import {
   Empty,
   message,
   Popconfirm,
+  Typography,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -132,7 +133,7 @@ export default function TradesPage() {
       width: 100,
       render: (v: number | null) => {
         if (v == null) return <Tag>未结算</Tag>;
-        return <Tag color={v >= 0 ? 'green' : 'red'}>{v >= 0 ? '+' : ''}{v.toFixed(2)}</Tag>;
+        return <Tag color={v >= 0 ? 'red' : 'green'}>{v >= 0 ? '+' : ''}{v.toFixed(2)}</Tag>;
       },
     },
     {
@@ -166,7 +167,7 @@ export default function TradesPage() {
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <h3 style={{ margin: 0 }}>交易操作记录</h3>
+        <Typography.Title level={5} style={{ margin: 0 }}>交易操作记录</Typography.Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
           新增记录
         </Button>

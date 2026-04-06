@@ -1,0 +1,29 @@
+/* 防止 React 挂载前白色闪烁 */
+body {
+  margin: 0;
+  background: #0d1117;
+}
+
+/* 深色滚动条 (Webkit) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #484f58;
+}
+
+/* 选中色 */
+::selection {
+  background: rgba(77, 171, 247, 0.3);
+}

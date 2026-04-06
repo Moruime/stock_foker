@@ -23,6 +23,9 @@ export const setFocusStock = (data: {
 export const updateTimeFrame = (time_frame: string) =>
   api.put<FocusStock>('/focus/timeframe', { time_frame }).then((r) => r.data);
 
+export const getFocusHistory = () =>
+  api.get<FocusStock[]>('/focus/history').then((r) => r.data);
+
 // --- 搜索 ---
 export const searchStocks = (keyword: string) =>
   api.get<StockSearchResult[]>('/stocks/search', { params: { keyword } }).then((r) => r.data);
