@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import FocusStock, TradeRecord, StockPosition
+from app.models.models import FocusStock, TradeRecord, StockPosition, RecordMode
 from app.models.schemas import (
     FocusStockCreate,
     FocusStockResponse,
@@ -206,9 +206,50 @@ def list_trades(
 
 @router.post("/trades", response_model=TradeRecordResponse)
 def create_trade(data: TradeRecordCreate, db: Session = Depends(get_db)):
-    """创建交易记录"""
+    """创建交易记录，实时交易模式下自动同步持仓"""
     record = TradeRecord(**data.model_dump())
     db.add(record)
+
+    # 实时交易模式：同步更新持仓
+    if data.record_mode == RecordMode.REALTIME:
+        position = db.query(StockPosition).filter(
+            StockPosition.stock_code == data.stock_code
+        ).first()
+
+        if data.trade_type.value == "buy":
+            if position:
+                # 加权平均成本
+                old_total = position.cost_price * position.quantity
+                new_total = data.price * data.quantity
+                new_quantity = position.quantity + data.quantity
+                position.cost_price = (old_total + new_total) / new_quantity
+                position.quantity = new_quantity
+            else:
+                # 自动创建持仓
+                position = StockPosition(
+                    stock_code=data.stock_code,
+                    stock_name=data.stock_name,
+                    cost_price=data.price,
+                    quantity=data.quantity,
+                    first_buy_date=data.traded_at,
+                )
+                db.add(position)
+
+        elif data.trade_type.value == "sell":
+            if not position or position.quantity <= 0:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail="无持仓记录，无法卖出",
+                )
+            if data.quantity > position.quantity:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"卖出数量({data.quantity})超过持仓数量({position.quantity})",
+                )
+            position.quantity -= data.quantity
+
     db.commit()
     db.refresh(record)
     return record

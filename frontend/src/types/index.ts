@@ -48,6 +48,8 @@ export interface StockAnalysis {
   time_frame: string;
 }
 
+export type RecordMode = 'backfill' | 'realtime';
+
 export interface TradeRecord {
   id: number;
   stock_code: string;
@@ -62,6 +64,7 @@ export interface TradeRecord {
   actual_result?: number;
   result_note?: string;
   traded_at: string;
+  record_mode: RecordMode;
   created_at: string;
 }
 
@@ -76,6 +79,7 @@ export interface TradeRecordCreate {
   target_price?: number;
   expected_hold_days?: number;
   traded_at: string;
+  record_mode?: RecordMode;
 }
 
 export interface TradingProfile {

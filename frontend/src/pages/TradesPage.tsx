@@ -9,6 +9,7 @@ import {
   InputNumber,
   Select,
   DatePicker,
+  Radio,
   Tag,
   Space,
   Empty,
@@ -35,6 +36,7 @@ export default function TradesPage() {
   const [resultModal, setResultModal] = useState<TradeRecord | null>(null);
   const [form] = Form.useForm();
   const [resultForm] = Form.useForm();
+  const [positionKey, setPositionKey] = useState(0);
 
   const loadRecords = () => {
     setLoading(true);
@@ -49,8 +51,13 @@ export default function TradesPage() {
   }, [focus]);
 
   const handleCreate = async () => {
+    let values;
     try {
-      const values = await form.validateFields();
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    try {
       await createTradeRecord({
         ...values,
         stock_code: focus?.stock_code || values.stock_code,
@@ -61,8 +68,13 @@ export default function TradesPage() {
       setModalOpen(false);
       form.resetFields();
       loadRecords();
-    } catch {
-      // validation failed
+      if (values.record_mode === 'realtime') {
+        setPositionKey((k) => k + 1);
+      }
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || '操作失败，请重试');
     }
   };
 
@@ -104,9 +116,12 @@ export default function TradesPage() {
       title: '类型',
       dataIndex: 'trade_type',
       key: 'trade_type',
-      width: 70,
-      render: (v: string) => (
-        <Tag color={v === 'buy' ? 'red' : 'green'}>{v === 'buy' ? '买入' : '卖出'}</Tag>
+      width: 120,
+      render: (v: string, r: TradeRecord) => (
+        <Space size={4}>
+          <Tag color={v === 'buy' ? 'red' : 'green'}>{v === 'buy' ? '买入' : '卖出'}</Tag>
+          {r.record_mode === 'backfill' && <Tag style={{ fontSize: 11 }}>补录</Tag>}
+        </Space>
       ),
     },
     { title: '价格', dataIndex: 'price', key: 'price', width: 80 },
@@ -175,7 +190,7 @@ export default function TradesPage() {
       </div>
 
       {focus && (
-        <PositionCard stockCode={focus.stock_code} stockName={focus.stock_name} />
+        <PositionCard key={positionKey} stockCode={focus.stock_code} stockName={focus.stock_name} />
       )}
 
       {records.length === 0 && !loading ? (
@@ -199,7 +214,13 @@ export default function TradesPage() {
         onCancel={() => setModalOpen(false)}
         width={600}
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" initialValues={{ record_mode: 'realtime' }}>
+          <Form.Item name="record_mode" label="记录类型">
+            <Radio.Group>
+              <Radio.Button value="realtime">实时交易</Radio.Button>
+              <Radio.Button value="backfill">历史补录</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
           {!focus && (
             <>
               <Form.Item name="stock_code" label="股票代码" rules={[{ required: true }]}>

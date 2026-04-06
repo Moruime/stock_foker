@@ -22,6 +22,11 @@ class MarketSentiment(str, enum.Enum):
     PESSIMISTIC = "pessimistic"
 
 
+class RecordMode(str, enum.Enum):
+    BACKFILL = "backfill"
+    REALTIME = "realtime"
+
+
 class FocusStock(Base):
     """当前关注的股票"""
     __tablename__ = "focus_stock"
@@ -52,6 +57,7 @@ class TradeRecord(Base):
     actual_result = Column(Float)
     result_note = Column(Text)
     traded_at = Column(DateTime, nullable=False)
+    record_mode = Column(SAEnum(RecordMode), nullable=False, default=RecordMode.REALTIME)
     created_at = Column(DateTime, server_default=func.now())
 
 

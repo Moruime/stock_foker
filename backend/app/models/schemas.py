@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
-from app.models.models import TimeFrame, TradeType, MarketSentiment
+from app.models.models import TimeFrame, TradeType, MarketSentiment, RecordMode
 
 
 # --- Focus Stock Schemas ---
@@ -38,6 +38,7 @@ class TradeRecordCreate(BaseModel):
     target_price: Optional[float] = None
     expected_hold_days: Optional[int] = None
     traded_at: datetime
+    record_mode: RecordMode = RecordMode.REALTIME
 
 
 class TradeRecordUpdate(BaseModel):
@@ -59,6 +60,7 @@ class TradeRecordResponse(BaseModel):
     actual_result: Optional[float] = None
     result_note: Optional[str] = None
     traded_at: datetime
+    record_mode: RecordMode = RecordMode.REALTIME
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
