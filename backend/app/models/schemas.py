@@ -115,3 +115,39 @@ class TradingAdvice(BaseModel):
     confidence: float
     reasoning: list[str]
     indicators_summary: dict
+
+
+# --- Position Schemas ---
+class PositionCreate(BaseModel):
+    stock_code: str
+    stock_name: str
+    cost_price: float
+    quantity: int
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
+    first_buy_date: datetime
+    note: Optional[str] = None
+
+
+class PositionUpdate(BaseModel):
+    cost_price: Optional[float] = None
+    quantity: Optional[int] = None
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
+    note: Optional[str] = None
+
+
+class PositionResponse(BaseModel):
+    id: int
+    stock_code: str
+    stock_name: str
+    cost_price: float
+    quantity: int
+    take_profit_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
+    first_buy_date: datetime
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import FocusStock, TradeRecord
+from app.models.models import FocusStock, TradeRecord, StockPosition
 from app.models.schemas import (
     FocusStockCreate,
     FocusStockResponse,
@@ -10,6 +10,9 @@ from app.models.schemas import (
     TradeRecordCreate,
     TradeRecordResponse,
     TradeRecordUpdate,
+    PositionCreate,
+    PositionUpdate,
+    PositionResponse,
 )
 
 router = APIRouter(prefix="/api", tags=["stocks"])
@@ -129,6 +132,61 @@ def get_stock_analysis(
         "advice": advice,
         "time_frame": time_frame,
     }
+
+
+# ==================== 持仓管理 ====================
+
+@router.get("/positions/{stock_code}", response_model=PositionResponse | None)
+def get_position(stock_code: str, db: Session = Depends(get_db)):
+    """获取指定股票的持仓信息"""
+    return db.query(StockPosition).filter(StockPosition.stock_code == stock_code).first()
+
+
+@router.post("/positions", response_model=PositionResponse)
+def create_position(data: PositionCreate, db: Session = Depends(get_db)):
+    """创建持仓记录"""
+    existing = db.query(StockPosition).filter(
+        StockPosition.stock_code == data.stock_code
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="该股票已有持仓记录，请使用更新接口")
+    position = StockPosition(**data.model_dump())
+    db.add(position)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+@router.put("/positions/{stock_code}", response_model=PositionResponse)
+def update_position(
+    stock_code: str,
+    data: PositionUpdate,
+    db: Session = Depends(get_db),
+):
+    """更新持仓记录"""
+    position = db.query(StockPosition).filter(
+        StockPosition.stock_code == stock_code
+    ).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="持仓记录不存在")
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(position, key, value)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+@router.delete("/positions/{stock_code}")
+def delete_position(stock_code: str, db: Session = Depends(get_db)):
+    """删除持仓记录"""
+    position = db.query(StockPosition).filter(
+        StockPosition.stock_code == stock_code
+    ).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="持仓记录不存在")
+    db.delete(position)
+    db.commit()
+    return {"message": "删除成功"}
 
 
 # ==================== 交易记录 ====================

@@ -72,3 +72,23 @@ class KlineCache(Base):
     low = Column(Float, nullable=False)
     volume = Column(Float, nullable=False)
     turnover = Column(Float, default=0)
+
+
+class StockPosition(Base):
+    """股票持仓信息"""
+    __tablename__ = "stock_positions"
+    __table_args__ = (
+        UniqueConstraint("stock_code", name="uq_position_stock"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock_code = Column(String(10), nullable=False, index=True)
+    stock_name = Column(String(50), nullable=False)
+    cost_price = Column(Float, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    take_profit_price = Column(Float)
+    stop_loss_price = Column(Float)
+    first_buy_date = Column(DateTime, nullable=False)
+    note = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

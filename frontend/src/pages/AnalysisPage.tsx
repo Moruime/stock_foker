@@ -12,12 +12,16 @@ import {
   Space,
   Row,
   Col,
+  Tooltip,
 } from 'antd';
+import { QuestionCircleOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
 import { getStockAnalysis } from '../services/api';
 import type { FocusStock, StockAnalysis } from '../types';
 import { COLORS, chartDarkOption } from '../theme';
+import { INDICATOR_MAP } from '../constants/indicators';
+import PositionCard from '../components/PositionCard';
 
 const { Title, Text } = Typography;
 
@@ -290,6 +294,12 @@ export default function AnalysisPage() {
         <Segmented options={periodOptions} value={period} onChange={(v) => setPeriod(v as string)} />
       </Space>
 
+      <PositionCard
+        stockCode={focus.stock_code}
+        stockName={focus.stock_name}
+        currentPrice={advice.indicators_summary.current_price}
+      />
+
       <Card title="K线走势与均线" size="small" style={{ marginBottom: 16 }}>
         <div ref={wrapperRef} style={{ userSelect: 'none' }}>
           <ReactECharts
@@ -329,11 +339,43 @@ export default function AnalysisPage() {
         <Col span={8}>
           <Card title="指标概览" size="small">
             <Descriptions column={1} size="small">
-              {Object.entries(advice.indicators_summary).map(([key, val]) => (
-                <Descriptions.Item key={key} label={key}>
-                  {typeof val === 'number' ? val.toFixed(2) : String(val)}
-                </Descriptions.Item>
-              ))}
+              {Object.entries(advice.indicators_summary).map(([key, val]) => {
+                const meta = INDICATOR_MAP[key];
+                const displayLabel = meta ? meta.label : key;
+                const interpretation = meta
+                  ? meta.interpret(val as number, advice.indicators_summary)
+                  : '';
+                return (
+                  <Descriptions.Item
+                    key={key}
+                    label={
+                      meta ? (
+                        <Tooltip
+                          title={
+                            <div>
+                              <div style={{ fontWeight: 600, marginBottom: 4 }}>{meta.label}</div>
+                              <div style={{ marginBottom: interpretation ? 6 : 0 }}>{meta.description}</div>
+                              {interpretation && (
+                                <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 4, color: '#ffd666' }}>
+                                  {interpretation}
+                                </div>
+                              )}
+                            </div>
+                          }
+                        >
+                          <span style={{ cursor: 'help' }}>
+                            {displayLabel} <QuestionCircleOutlined style={{ fontSize: 11, color: COLORS.textMuted }} />
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        displayLabel
+                      )
+                    }
+                  >
+                    {typeof val === 'number' ? val.toFixed(2) : String(val)}
+                  </Descriptions.Item>
+                );
+              })}
             </Descriptions>
           </Card>
         </Col>

@@ -6,6 +6,9 @@ import type {
   TradeRecord,
   TradeRecordCreate,
   TradingProfile,
+  Position,
+  PositionCreate,
+  PositionUpdate,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -65,3 +68,16 @@ export const getTradingProfile = (stockCode?: string) =>
   api
     .get<TradingProfile>('/profile', { params: { stock_code: stockCode } })
     .then((r) => r.data);
+
+// --- 持仓管理 ---
+export const getPosition = (stockCode: string) =>
+  api.get<Position | null>(`/positions/${stockCode}`).then((r) => r.data);
+
+export const createPosition = (data: PositionCreate) =>
+  api.post<Position>('/positions', data).then((r) => r.data);
+
+export const updatePosition = (stockCode: string, data: PositionUpdate) =>
+  api.put<Position>(`/positions/${stockCode}`, data).then((r) => r.data);
+
+export const deletePosition = (stockCode: string) =>
+  api.delete(`/positions/${stockCode}`).then((r) => r.data);

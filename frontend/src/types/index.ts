@@ -91,3 +91,36 @@ export interface TradingProfile {
   common_buy_reasons: { reason: string; count: number }[];
   common_sell_reasons: { reason: string; count: number }[];
 }
+
+export interface Position {
+  id: number;
+  stock_code: string;
+  stock_name: string;
+  cost_price: number;
+  quantity: number;
+  take_profit_price?: number;
+  stop_loss_price?: number;
+  first_buy_date: string;
+  note?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PositionCreate {
+  stock_code: string;
+  stock_name: string;
+  cost_price: number;
+  quantity: number;
+  take_profit_price?: number;
+  stop_loss_price?: number;
+  first_buy_date: string;
+  note?: string;
+}
+
+export interface PositionUpdate {
+  cost_price?: number;
+  quantity?: number;
+  take_profit_price?: number;
+  stop_loss_price?: number;
+  note?: string;
+}

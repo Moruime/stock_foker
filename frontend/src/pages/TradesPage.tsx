@@ -25,6 +25,7 @@ import {
   deleteTradeRecord,
 } from '../services/api';
 import type { FocusStock, TradeRecord } from '../types';
+import PositionCard from '../components/PositionCard';
 
 export default function TradesPage() {
   const { focus } = useOutletContext<{ focus: FocusStock | null }>();
@@ -172,6 +173,10 @@ export default function TradesPage() {
           新增记录
         </Button>
       </div>
+
+      {focus && (
+        <PositionCard stockCode={focus.stock_code} stockName={focus.stock_name} />
+      )}
 
       {records.length === 0 && !loading ? (
         <Empty description="暂无交易记录" />
