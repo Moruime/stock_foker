@@ -16,16 +16,35 @@ import {
   Button,
   List,
 } from 'antd';
-import { QuestionCircleOutlined, RobotOutlined, ReloadOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined, RobotOutlined, ReloadOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
-import { getStockAnalysis, runEnhancedAnalysis } from '../services/api';
+import { getStockAnalysis, runEnhancedAnalysis, clearAgentCache, getCachedEnhancedAnalysis } from '../services/api';
 import type { FocusStock, StockAnalysis, EnhancedAnalysis } from '../types';
 import { COLORS, chartDarkOption } from '../theme';
 import { INDICATOR_MAP } from '../constants/indicators';
 import PositionCard from '../components/PositionCard';
+import SnapshotPanel from '../components/SnapshotPanel';
+import { useAgentCache } from '../contexts/AgentCacheContext';
 
 const { Title, Text } = Typography;
+
+// ------------------------------------------------------------------ helpers
+
+/** 返回最近一次 09:00 的本地 Date */
+function last9am(): Date {
+  const now = new Date();
+  const boundary = new Date(now);
+  boundary.setHours(9, 0, 0, 0);
+  if (now < boundary) boundary.setDate(boundary.getDate() - 1);
+  return boundary;
+}
+
+/** 判断 timestamp 是否在 9am 边界之前（即过期） */
+function isStale(timestamp: string): boolean {
+  if (!timestamp) return false;
+  return new Date(timestamp) < last9am();
+}
 
 const periodOptions = [
   { value: 'daily', label: '日K' },
@@ -46,6 +65,9 @@ export default function AnalysisPage() {
   const [error, setError] = useState('');
   const [aiAnalysis, setAiAnalysis] = useState<EnhancedAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiFromCache, setAiFromCache] = useState(false);
+
+  const { getEnhancedCache, setEnhancedCache, invalidateStock } = useAgentCache();
 
   useEffect(() => {
     if (!focus) return;
@@ -57,14 +79,69 @@ export default function AnalysisPage() {
       .finally(() => setLoading(false));
   }, [focus, period]);
 
-  const handleAiAnalysis = useCallback(() => {
+  // mount 或切换股票时，自动恢复 AI 分析：优先前端内存缓存，其次查询后端 DB 缓存
+  useEffect(() => {
+    if (!focus) {
+      setAiAnalysis(null);
+      setAiFromCache(false);
+      return;
+    }
+    // 1. 前端内存缓存命中
+    const cached = getEnhancedCache(focus.stock_code);
+    if (cached) {
+      setAiAnalysis(cached);
+      setAiFromCache(true);
+      return;
+    }
+    // 2. 内存无缓存，查询后端 DB（不运行 Agent）
+    setAiLoading(true);
+    getCachedEnhancedAnalysis(focus.stock_code)
+      .then((data) => {
+        setAiAnalysis(data);
+        setEnhancedCache(focus.stock_code, data);
+        setAiFromCache(true);
+      })
+      .catch(() => {
+        // 404 表示当天尚未分析，保持空状态等待用户手动触发
+        setAiAnalysis(null);
+        setAiFromCache(false);
+      })
+      .finally(() => setAiLoading(false));
+  }, [focus?.stock_code]);
+
+  const handleAiAnalysis = useCallback(async () => {
     if (!focus) return;
     setAiLoading(true);
-    runEnhancedAnalysis(focus.stock_code, focus.stock_name)
-      .then(setAiAnalysis)
-      .catch(() => { /* silently fail, user can retry */ })
-      .finally(() => setAiLoading(false));
-  }, [focus]);
+    try {
+      const data = await runEnhancedAnalysis(focus.stock_code, focus.stock_name);
+      setAiAnalysis(data);
+      setEnhancedCache(focus.stock_code, data);
+      setAiFromCache(false);
+    } catch {
+      // 静默失败，用户可重试
+    } finally {
+      setAiLoading(false);
+    }
+  }, [focus, setEnhancedCache]);
+
+  const handleAiRefresh = useCallback(async () => {
+    if (!focus) return;
+    // 先清除后端 DB 缓存和前端内存缓存
+    try { await clearAgentCache(focus.stock_code); } catch { /* ignore */ }
+    invalidateStock(focus.stock_code);
+    setAiAnalysis(null);
+    setAiFromCache(false);
+    setAiLoading(true);
+    try {
+      const data = await runEnhancedAnalysis(focus.stock_code, focus.stock_name);
+      setAiAnalysis(data);
+      setEnhancedCache(focus.stock_code, data);
+    } catch {
+      // 静默失败
+    } finally {
+      setAiLoading(false);
+    }
+  }, [focus, invalidateStock, setEnhancedCache]);
 
   const chartInstance = useRef<ECharts | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -437,22 +514,51 @@ export default function AnalysisPage() {
             <span>AI 综合分析</span>
             {aiAnalysis?.enhanced_advice?.llm_used && <Tag color="blue">AI</Tag>}
             {aiAnalysis?.enhanced_advice && !aiAnalysis.enhanced_advice.llm_used && <Tag>规则</Tag>}
+            {aiFromCache && aiAnalysis?.enhanced_advice?.timestamp && (
+              <Tooltip title={`缓存于 ${new Date(aiAnalysis.enhanced_advice.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`}>
+                <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal', cursor: 'default' }}>
+                  <ClockCircleOutlined style={{ marginRight: 3 }} />
+                  缓存于 {new Date(aiAnalysis.enhanced_advice.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              </Tooltip>
+            )}
           </Space>
         }
         size="small"
         style={{ marginTop: 16 }}
         extra={
-          <Button
-            icon={aiAnalysis ? <ReloadOutlined /> : <RobotOutlined />}
-            onClick={handleAiAnalysis}
-            loading={aiLoading}
-            type={aiAnalysis ? 'default' : 'primary'}
-          >
-            {aiAnalysis ? '刷新' : '开始分析'}
-          </Button>
+          aiAnalysis ? (
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={handleAiRefresh}
+              loading={aiLoading}
+            >
+              刷新
+            </Button>
+          ) : (
+            <Button
+              icon={<RobotOutlined />}
+              onClick={handleAiAnalysis}
+              loading={aiLoading}
+              type="primary"
+            >
+              开始分析
+            </Button>
+          )
         }
       >
         {aiLoading && <Spin tip="AI 分析中，请稍候..." style={{ display: 'block', margin: '24px auto' }} />}
+        
+          {/* 过期提示：9点后的旧数据 */}
+          {!aiLoading && aiFromCache && aiAnalysis?.enhanced_advice?.timestamp && isStale(aiAnalysis.enhanced_advice.timestamp) && (
+            <Alert
+              type="warning"
+              showIcon
+              message="当前显示的是 09:00 之前的旧数据，可能不反映今日最新行情"
+              description={`数据来自 ${new Date(aiAnalysis.enhanced_advice.timestamp).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}，建议点击「刷新」获取最新分析`}
+              style={{ marginBottom: 14 }}
+            />
+          )}
 
         {!aiLoading && !aiAnalysis && (
           <Empty description="点击「开始分析」运行 AI 四维度综合分析" />
@@ -553,6 +659,8 @@ export default function AnalysisPage() {
           );
         })()}
       </Card>
+      {/* AI 综合分析历史记录 */}
+      {focus && <SnapshotPanel agentType="enhanced_advice" stockCode={focus.stock_code} />}
     </div>
   );
 }

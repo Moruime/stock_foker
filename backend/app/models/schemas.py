@@ -196,3 +196,17 @@ class LLMStatusResponse(BaseModel):
     max_tokens: int
     timeout: int
     enable_thinking: bool
+
+
+# --- Snapshot Schemas ---
+class SnapshotResponse(BaseModel):
+    id: int
+    agent_type: str
+    stock_code: str
+    date: str
+    snapshot_data: dict[str, Any]
+    llm_used: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

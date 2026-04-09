@@ -98,6 +98,23 @@ class AgentResultCache(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class DailyAgentSnapshot(Base):
+    """Agent 每日关键指标快照，每种 Agent 每支股票每天保留一条最新记录"""
+    __tablename__ = "daily_agent_snapshot"
+    __table_args__ = (
+        UniqueConstraint("agent_type", "stock_code", "date", name="uq_snapshot"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_type = Column(String(20), nullable=False, index=True)  # sentiment | sector | macro
+    stock_code = Column(String(10), nullable=False, index=True)
+    date = Column(String(10), nullable=False)       # YYYY-MM-DD
+    snapshot_data = Column(Text, nullable=False)    # JSON 关键指标
+    llm_used = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class StockPosition(Base):
     """股票持仓信息"""
     __tablename__ = "stock_positions"

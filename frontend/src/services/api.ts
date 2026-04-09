@@ -12,6 +12,7 @@ import type {
   AgentResult,
   EnhancedAnalysis,
   LLMStatus,
+  AgentSnapshot,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -109,6 +110,12 @@ export const runEnhancedAnalysis = (stockCode: string, stockName: string) =>
     })
     .then((r) => r.data);
 
+// 仅查询 DB 缓存，不运行 Agent，缓存不存在则 reject
+export const getCachedEnhancedAnalysis = (stockCode: string) =>
+  api
+    .get<EnhancedAnalysis>(`/agent/enhanced-analysis/cached/${stockCode}`)
+    .then((r) => r.data);
+
 export const getLLMStatus = () =>
   api.get<LLMStatus>('/agent/llm-status').then((r) => r.data);
 
@@ -117,3 +124,14 @@ export const reloadLLMConfig = () =>
 
 export const clearAgentCache = (stockCode: string) =>
   api.delete(`/agent/cache/${stockCode}`).then((r) => r.data);
+
+// --- Snapshots ---
+export const getSnapshotDates = (agentType: string, stockCode: string) =>
+  api
+    .get<string[]>(`/snapshots/${agentType}/dates`, { params: { stock_code: stockCode } })
+    .then((r) => r.data);
+
+export const getSnapshotDetail = (agentType: string, date: string, stockCode: string) =>
+  api
+    .get<AgentSnapshot>(`/snapshots/${agentType}/${date}`, { params: { stock_code: stockCode } })
+    .then((r) => r.data);

@@ -158,3 +158,15 @@ export interface LLMStatus {
   timeout: number;
   enable_thinking: boolean;
 }
+
+// --- Snapshot Types ---
+export interface AgentSnapshot {
+  id: number;
+  agent_type: string;
+  stock_code: string;
+  date: string;
+  snapshot_data: Record<string, unknown>;
+  llm_used: boolean;
+  created_at: string;
+  updated_at: string;
+}

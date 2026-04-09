@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import AgentResultCache, FocusStock
+from app.models.models import AgentResultCache, DailyAgentSnapshot, FocusStock
 from app.models.schemas import (
     AgentResultResponse,
     AgentRunRequest,
@@ -37,17 +37,42 @@ def _cache_key_today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _last_9am() -> datetime:
+    """返回最近一次 09:00 的时间点，作为每日缓存新鲜度边界。"""
+    now = datetime.now()
+    today_9am = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    return today_9am if now >= today_9am else today_9am - timedelta(days=1)
+
+
 def _get_cached(db: Session, agent_name: str, stock_code: str) -> dict | None:
-    """查询当天缓存。LLM 可用但缓存为降级结果时跳过缓存。"""
+    """查询新鲜缓存：在上一个 09:00 之后生成才算新鲜。LLM 可用时降级结果跳过。"""
     row = db.query(AgentResultCache).filter(
         AgentResultCache.agent_name == agent_name,
         AgentResultCache.stock_code == stock_code,
-        AgentResultCache.cache_key == _cache_key_today(),
-    ).first()
+        AgentResultCache.created_at >= _last_9am(),
+    ).order_by(AgentResultCache.created_at.desc()).first()
     if row:
         # LLM 现在可用但缓存是未使用 LLM 的降级结果 → 跳过缓存重新分析
         if not row.llm_used and get_llm_client().is_available():
             return None
+        return {
+            "agent_name": row.agent_name,
+            "status": row.status,
+            "data": json.loads(row.data),
+            "llm_used": bool(row.llm_used),
+            "timestamp": row.created_at.isoformat() if row.created_at else "",
+            "error_message": row.error_message,
+        }
+    return None
+
+
+def _get_stale_cached(db: Session, agent_name: str, stock_code: str) -> dict | None:
+    """查询最近一条缓存（含过期），用于页面刷新时恢复显示旧数据。"""
+    row = db.query(AgentResultCache).filter(
+        AgentResultCache.agent_name == agent_name,
+        AgentResultCache.stock_code == stock_code,
+    ).order_by(AgentResultCache.created_at.desc()).first()
+    if row:
         return {
             "agent_name": row.agent_name,
             "status": row.status,
@@ -93,6 +118,55 @@ def _run_agent(agent, **kwargs) -> dict:
 
 
 # ------------------------------------------------------------------
+# 快照工具函数
+# ------------------------------------------------------------------
+
+# 每种 Agent 需要保存到快照的关键字段
+_SNAPSHOT_FIELDS: dict[str, list[str]] = {
+    "sentiment": ["overall_sentiment", "sentiment_label", "raw_news_count", "noise_ratio", "analysis"],
+    "sector":    ["sector_name", "sector_trend", "relative_strength", "sector_rotation_signal", "analysis"],
+    "macro":     ["market_phase", "market_sentiment", "risk_level", "impact_on_stock", "analysis"],
+    "enhanced_advice": ["signal", "confidence", "summary", "position_advice", "reasoning", "risk_warnings", "dimension_scores"],
+}
+
+
+def _save_snapshot(db: Session, result: dict, stock_code: str) -> None:
+    """Agent 运行成功后，抽取关键指标写入每日快照表。每种 Agent 每支股票每天仅保留最新一条。"""
+    agent_name = result.get("agent_name", "")
+    if agent_name not in _SNAPSHOT_FIELDS:
+        return
+    if result.get("status") == "error":
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = result.get("data", {})
+    snapshot = {k: data.get(k) for k in _SNAPSHOT_FIELDS[agent_name]}
+
+    existing = db.query(DailyAgentSnapshot).filter(
+        DailyAgentSnapshot.agent_type == agent_name,
+        DailyAgentSnapshot.stock_code == stock_code,
+        DailyAgentSnapshot.date == today,
+    ).first()
+
+    if existing:
+        existing.snapshot_data = json.dumps(snapshot, ensure_ascii=False)
+        existing.llm_used = int(result.get("llm_used", False))
+    else:
+        row = DailyAgentSnapshot(
+            agent_type=agent_name,
+            stock_code=stock_code,
+            date=today,
+            snapshot_data=json.dumps(snapshot, ensure_ascii=False),
+            llm_used=int(result.get("llm_used", False)),
+        )
+        db.add(row)
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("快照写入失败 agent=%s stock=%s: %s", agent_name, stock_code, exc)
+
+
+# ------------------------------------------------------------------
 # 单 Agent 端点
 # ------------------------------------------------------------------
 
@@ -108,6 +182,7 @@ def run_sentiment(req: AgentRunRequest, db: Session = Depends(get_db)):
         stock_name=req.stock_name,
     )
     _save_cache(db, result, req.stock_code)
+    _save_snapshot(db, result, req.stock_code)
     return result
 
 
@@ -123,6 +198,7 @@ def run_sector(req: AgentRunRequest, db: Session = Depends(get_db)):
         stock_name=req.stock_name,
     )
     _save_cache(db, result, req.stock_code)
+    _save_snapshot(db, result, req.stock_code)
     return result
 
 
@@ -134,6 +210,7 @@ def run_macro(req: AgentRunRequest, db: Session = Depends(get_db)):
         return cached
     result = _run_agent(MacroAgent(), stock_code=req.stock_code, stock_name=req.stock_name)
     _save_cache(db, result, req.stock_code)
+    _save_snapshot(db, result, req.stock_code)
     return result
 
 
@@ -141,11 +218,51 @@ def run_macro(req: AgentRunRequest, db: Session = Depends(get_db)):
 # 综合分析（链路端点）
 # ------------------------------------------------------------------
 
+@router.get("/enhanced-analysis/cached/{stock_code}", response_model=EnhancedAnalysisResponse)
+def get_enhanced_analysis_cached(stock_code: str, db: Session = Depends(get_db)):
+    """仅返回 DB 缓存中的综合分析结果（含过期数据），不运行任何 Agent。没有缓存则 404。"""
+    cached_enhanced = _get_stale_cached(db, "enhanced_advice", stock_code)
+    if not cached_enhanced:
+        raise HTTPException(status_code=404, detail="未找到当天缓存")
+    _empty: dict = {
+        "agent_name": "",
+        "status": "success",
+        "data": {},
+        "llm_used": False,
+        "timestamp": datetime.now().isoformat(),
+        "error_message": None,
+    }
+    return {
+        "sentiment": _get_cached(db, "sentiment", stock_code) or {**_empty, "agent_name": "sentiment"},
+        "sector": _get_cached(db, "sector", stock_code) or {**_empty, "agent_name": "sector"},
+        "macro": _get_cached(db, "macro", stock_code) or {**_empty, "agent_name": "macro"},
+        "enhanced_advice": cached_enhanced,
+    }
+
+
 @router.post("/enhanced-analysis", response_model=EnhancedAnalysisResponse)
 def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
     """综合 AI 分析 — 并行运行 3 个上游 Agent，再运行增强建议 Agent。"""
     stock_code = req.stock_code
     stock_name = req.stock_name
+
+    # 0. 先检查 enhanced_advice 整体缓存，命中则直接拼装响应返回
+    cached_enhanced = _get_cached(db, "enhanced_advice", stock_code)
+    if cached_enhanced:
+        _empty: dict = {
+            "agent_name": "",
+            "status": "success",
+            "data": {},
+            "llm_used": False,
+            "timestamp": datetime.now().isoformat(),
+            "error_message": None,
+        }
+        return {
+            "sentiment": _get_cached(db, "sentiment", stock_code) or {**_empty, "agent_name": "sentiment"},
+            "sector": _get_cached(db, "sector", stock_code) or {**_empty, "agent_name": "sector"},
+            "macro": _get_cached(db, "macro", stock_code) or {**_empty, "agent_name": "macro"},
+            "enhanced_advice": cached_enhanced,
+        }
 
     # 1. 并行执行上游 3 个 Agent（优先用缓存）
     upstream_results: dict[str, dict] = {}
@@ -175,6 +292,7 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
                     result = future.result()
                     upstream_results[name] = result
                     _save_cache(db, result, stock_code)
+                    _save_snapshot(db, result, stock_code)
                 except Exception as e:
                     logger.error("Agent %s 执行异常: %s", name, e)
                     upstream_results[name] = {
@@ -210,6 +328,7 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
         macro_result=upstream_results.get("macro", {}).get("data", {}),
     )
     _save_cache(db, enhanced_result, stock_code)
+    _save_snapshot(db, enhanced_result, stock_code)
 
     return {
         "sentiment": upstream_results.get("sentiment", {"agent_name": "sentiment", "status": "error", "data": {}, "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": "未执行"}),

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
 from app.routers.stock_router import router as stock_router
 from app.routers.agent_router import router as agent_router
+from app.routers.snapshot_router import router as snapshot_router
 
 app = FastAPI(title="Stock Foker API", version="0.1.0")
 
@@ -17,6 +18,7 @@ app.add_middleware(
 
 app.include_router(stock_router)
 app.include_router(agent_router)
+app.include_router(snapshot_router)
 
 
 @app.on_event("startup")

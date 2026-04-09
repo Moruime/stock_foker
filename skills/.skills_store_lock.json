@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "财务数据查询": {
+      "name": "财务数据查询",
+      "zip_url": "http://ms.10jqka.com.cn/gateway/market/api/v1/skills/square/download?name=%E8%B4%A2%E5%8A%A1%E6%95%B0%E6%8D%AE%E6%9F%A5%E8%AF%A2",
+      "source": "skillhub",
+      "version": ""
+    }
+  }
+}

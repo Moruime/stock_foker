@@ -1,32 +1,61 @@
-import { useState, useEffect } from 'react';
-import { Card, Tag, List, Typography, Spin, Alert, Button, Empty, Space } from 'antd';
-import { ReloadOutlined, RiseOutlined, FallOutlined } from '@ant-design/icons';
+import { useState, useEffect, useCallback } from 'react';
+import { Card, Tag, List, Typography, Spin, Alert, Button, Empty, Space, Tooltip } from 'antd';
+import { ReloadOutlined, RiseOutlined, FallOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useOutletContext } from 'react-router-dom';
-import { runMacroAgent } from '../services/api';
+import { runMacroAgent, clearAgentCache } from '../services/api';
 import type { FocusStock, AgentResult } from '../types';
 import { COLORS } from '../theme';
+import { useAgentCache } from '../contexts/AgentCacheContext';
+import SnapshotPanel from '../components/SnapshotPanel';
 
 const { Text, Title, Paragraph } = Typography;
+
+function formatCacheTime(isoStr: string): string {
+  const d = new Date(isoStr);
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
 
 export default function MacroPage() {
   const { focus } = useOutletContext<{ focus: FocusStock | null }>();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AgentResult | null>(null);
   const [error, setError] = useState('');
+  const [fromCache, setFromCache] = useState(false);
 
-  const fetchData = async () => {
+  const { getAgentCache, setAgentCache, invalidateStock } = useAgentCache();
+
+  const fetchData = useCallback(async (forceRefresh = false) => {
     if (!focus) return;
+
+    if (!forceRefresh) {
+      const cached = getAgentCache(focus.stock_code, 'macro');
+      if (cached) {
+        setResult(cached);
+        setFromCache(true);
+        return;
+      }
+    }
+
     setLoading(true);
     setError('');
+    setFromCache(false);
     try {
       const data = await runMacroAgent(focus.stock_code, focus.stock_name);
       setResult(data);
+      setAgentCache(focus.stock_code, 'macro', data);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '获取宏观分析失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [focus, getAgentCache, setAgentCache]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!focus) return;
+    try { await clearAgentCache(focus.stock_code); } catch { /* ignore */ }
+    invalidateStock(focus.stock_code);
+    fetchData(true);
+  }, [focus, invalidateStock, fetchData]);
 
   useEffect(() => {
     fetchData();
@@ -54,9 +83,19 @@ export default function MacroPage() {
       <Space direction="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Title level={4} style={{ margin: 0 }}>宏观环境分析</Title>
-          <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
-            刷新
-          </Button>
+          <Space>
+            {fromCache && result?.timestamp && (
+              <Tooltip title={`数据缓存于 ${formatCacheTime(result.timestamp)}`}>
+                <Text type="secondary" style={{ fontSize: 12, cursor: 'default' }}>
+                  <ClockCircleOutlined style={{ marginRight: 4 }} />
+                  缓存于 {formatCacheTime(result.timestamp)}
+                </Text>
+              </Tooltip>
+            )}
+            <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>
+              刷新
+            </Button>
+          </Space>
         </div>
 
         {error && <Alert type="error" message={error} showIcon />}
@@ -128,6 +167,7 @@ export default function MacroPage() {
           </>
         )}
       </Space>
+      {focus && <SnapshotPanel agentType="macro" stockCode={focus.stock_code} />}
     </Spin>
   );
 }
