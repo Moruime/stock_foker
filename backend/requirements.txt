@@ -7,3 +7,4 @@ pandas-ta>=0.4.71b0
 pydantic>=2.11
 python-dotenv>=1.1
 httpx>=0.28
+requests>=2.32
