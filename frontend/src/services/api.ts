@@ -125,6 +125,29 @@ export const reloadLLMConfig = () =>
 export const clearAgentCache = (stockCode: string) =>
   api.delete(`/agent/cache/${stockCode}`).then((r) => r.data);
 
+// --- Data Source ---
+export interface DataSourceResponse {
+  source_type: string;
+  stock_code: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+  from_cache: boolean;
+}
+
+export const getDataSource = (stockCode: string, sourceType: string, stockName: string) =>
+  api
+    .get<DataSourceResponse>(`/data-source/${stockCode}/${sourceType}`, {
+      params: { stock_name: stockName },
+    })
+    .then((r) => r.data);
+
+export const refreshDataSource = (stockCode: string, sourceType: string, stockName: string) =>
+  api
+    .post<DataSourceResponse>(`/data-source/${stockCode}/${sourceType}/refresh`, null, {
+      params: { stock_name: stockName },
+    })
+    .then((r) => r.data);
+
 // --- Snapshots ---
 export const getSnapshotDates = (agentType: string, stockCode: string) =>
   api

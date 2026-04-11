@@ -26,6 +26,7 @@ import { INDICATOR_MAP } from '../constants/indicators';
 import PositionCard from '../components/PositionCard';
 import SnapshotPanel from '../components/SnapshotPanel';
 import { useAgentCache } from '../contexts/AgentCacheContext';
+import { invalidateDataSourceCache } from '../hooks/useDataSource';
 
 const { Title, Text } = Typography;
 
@@ -63,11 +64,23 @@ export default function AnalysisPage() {
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [aiAnalysis, setAiAnalysis] = useState<EnhancedAnalysis | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiFromCache, setAiFromCache] = useState(false);
-
   const { getEnhancedCache, setEnhancedCache, invalidateStock } = useAgentCache();
+
+  // 同步读取内存缓存作为初始值，避免页面切换回来时闪烁空态
+  const [aiAnalysis, setAiAnalysis] = useState<EnhancedAnalysis | null>(() => {
+    if (!focus) return null;
+    return getEnhancedCache(focus.stock_code);
+  });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiFromCache, setAiFromCache] = useState(() => {
+    if (!focus) return false;
+    return getEnhancedCache(focus.stock_code) !== null;
+  });
+  // 标记是否已完成缓存检查，防止初始渲染闪烁空态
+  const [aiChecked, setAiChecked] = useState(() => {
+    if (!focus) return true;
+    return getEnhancedCache(focus.stock_code) !== null;
+  });
 
   useEffect(() => {
     if (!focus) return;
@@ -84,13 +97,15 @@ export default function AnalysisPage() {
     if (!focus) {
       setAiAnalysis(null);
       setAiFromCache(false);
+      setAiChecked(true);
       return;
     }
-    // 1. 前端内存缓存命中
+    // 1. 前端内存缓存命中（初始化时已同步读取，但切换股票时需重新检查）
     const cached = getEnhancedCache(focus.stock_code);
     if (cached) {
       setAiAnalysis(cached);
       setAiFromCache(true);
+      setAiChecked(true);
       return;
     }
     // 2. 内存无缓存，查询后端 DB（不运行 Agent）
@@ -106,7 +121,7 @@ export default function AnalysisPage() {
         setAiAnalysis(null);
         setAiFromCache(false);
       })
-      .finally(() => setAiLoading(false));
+      .finally(() => { setAiLoading(false); setAiChecked(true); });
   }, [focus?.stock_code]);
 
   const handleAiAnalysis = useCallback(async () => {
@@ -129,6 +144,7 @@ export default function AnalysisPage() {
     // 先清除后端 DB 缓存和前端内存缓存
     try { await clearAgentCache(focus.stock_code); } catch { /* ignore */ }
     invalidateStock(focus.stock_code);
+    invalidateDataSourceCache(focus.stock_code);
     setAiAnalysis(null);
     setAiFromCache(false);
     setAiLoading(true);
@@ -560,7 +576,7 @@ export default function AnalysisPage() {
             />
           )}
 
-        {!aiLoading && !aiAnalysis && (
+        {!aiLoading && !aiAnalysis && aiChecked && (
           <Empty description="点击「开始分析」运行 AI 四维度综合分析" />
         )}
 
@@ -666,6 +682,7 @@ export default function AnalysisPage() {
           );
         })()}
       </Card>
+
       {/* AI 综合分析历史记录 */}
       {focus && <SnapshotPanel agentType="enhanced_advice" stockCode={focus.stock_code} />}
     </div>

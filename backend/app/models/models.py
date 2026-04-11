@@ -115,6 +115,21 @@ class DailyAgentSnapshot(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class DataSourceCache(Base):
+    """数据源缓存 — 独立于 Agent 结果，存储原始 hithink API 响应"""
+    __tablename__ = "data_source_cache"
+    __table_args__ = (
+        UniqueConstraint("stock_code", "source_type", "cache_key", name="uq_ds_cache"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock_code = Column(String(10), nullable=False, index=True)
+    source_type = Column(String(30), nullable=False, index=True)
+    cache_key = Column(String(100), nullable=False)   # 日期 "2026-04-11"
+    data = Column(Text, nullable=False)               # JSON
+    created_at = Column(DateTime)
+
+
 class StockPosition(Base):
     """股票持仓信息"""
     __tablename__ = "stock_positions"

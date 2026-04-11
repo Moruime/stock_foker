@@ -15,7 +15,7 @@ class EnhancedAdviceAgent(BaseAgent):
         """从 kwargs 获取上游数据（由 router 层预先准备）。"""
         from app.services.advice_service import generate_advice
         from app.services.profile_service import generate_profile
-        from app.services.data_fetcher import fetch_hithink_finance_data, fetch_hithink_insresearch_data
+        from app.services.data_fetcher import fetch_hithink_finance_data, fetch_hithink_insresearch_data, parallel_fetch
 
         db = kwargs.get("db")
         stock_code = kwargs["stock_code"]
@@ -42,16 +42,35 @@ class EnhancedAdviceAgent(BaseAgent):
                     "stop_loss_price": pos.stop_loss_price,
                 }
 
-        # 基本面数据（同花顺）
-        fundamental_data = fetch_hithink_finance_data(stock_name)
-        insresearch_data = fetch_hithink_insresearch_data(stock_name)
+        # 非缓存基本面数据（仅供 LLM 分析用）
+        base_hithink = parallel_fetch({
+            "fundamental_data": (fetch_hithink_finance_data, (stock_name,)),
+            "insresearch_data": (fetch_hithink_insresearch_data, (stock_name,)),
+        })
+
+        # 使用数据源缓存服务获取可独立展示的数据
+        if db:
+            from app.services.data_source_service import get_data_source
+            reports_data, _, _ = get_data_source(db, stock_code, stock_name, "reports")
+            business_data, _, _ = get_data_source(db, stock_code, stock_name, "business")
+            basicinfo_data, _, _ = get_data_source(db, stock_code, stock_name, "basicinfo")
+            shareholders_data, _, _ = get_data_source(db, stock_code, stock_name, "shareholders")
+        else:
+            from app.services.data_fetcher import fetch_hithink_reports, fetch_hithink_business_data, fetch_hithink_basicinfo, fetch_hithink_shareholders
+            reports_data = fetch_hithink_reports(stock_name)
+            business_data = fetch_hithink_business_data(stock_name)
+            basicinfo_data = fetch_hithink_basicinfo(stock_name)
+            shareholders_data = fetch_hithink_shareholders(stock_name)
 
         return {
             "technical_advice": technical_advice,
             "profile": profile,
             "position": position,
-            "fundamental_data": fundamental_data,
-            "insresearch_data": insresearch_data,
+            **base_hithink,
+            "reports_data": reports_data,
+            "business_data": business_data,
+            "basicinfo_data": basicinfo_data,
+            "shareholders_data": shareholders_data,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -66,6 +85,10 @@ class EnhancedAdviceAgent(BaseAgent):
             position=raw_data["position"],
             fundamental_data=raw_data.get("fundamental_data", {}),
             insresearch_data=raw_data.get("insresearch_data", {}),
+            reports_data=raw_data.get("reports_data", {}),
+            business_data=raw_data.get("business_data", {}),
+            basicinfo_data=raw_data.get("basicinfo_data", {}),
+            shareholders_data=raw_data.get("shareholders_data", {}),
         )
 
     def parse_response(self, llm_output: dict, *, raw_data: dict, **kwargs: Any) -> dict:

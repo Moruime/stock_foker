@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import AgentResultCache, DailyAgentSnapshot, FocusStock
+from app.models.models import AgentResultCache, DailyAgentSnapshot, FocusStock, DataSourceCache
 from app.models.schemas import (
     AgentResultResponse,
     AgentRunRequest,
@@ -183,6 +183,7 @@ def run_sentiment(req: AgentRunRequest, db: Session = Depends(get_db)):
         SentimentAgent(),
         stock_code=req.stock_code,
         stock_name=req.stock_name,
+        db=db,
     )
     _save_cache(db, result, req.stock_code)
     _save_snapshot(db, result, req.stock_code)
@@ -199,6 +200,7 @@ def run_sector(req: AgentRunRequest, db: Session = Depends(get_db)):
         SectorAgent(),
         stock_code=req.stock_code,
         stock_name=req.stock_name,
+        db=db,
     )
     _save_cache(db, result, req.stock_code)
     _save_snapshot(db, result, req.stock_code)
@@ -211,7 +213,7 @@ def run_macro(req: AgentRunRequest, db: Session = Depends(get_db)):
     cached = _get_cached(db, "macro", req.stock_code)
     if cached:
         return cached
-    result = _run_agent(MacroAgent(), stock_code=req.stock_code, stock_name=req.stock_name)
+    result = _run_agent(MacroAgent(), stock_code=req.stock_code, stock_name=req.stock_name, db=db)
     _save_cache(db, result, req.stock_code)
     _save_snapshot(db, result, req.stock_code)
     return result
@@ -286,6 +288,7 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
                     agent_tuple[0],
                     stock_code=stock_code,
                     stock_name=stock_name,
+                    db=db,
                 ): name
                 for name, agent_tuple in agents_to_run.items()
             }
@@ -370,9 +373,12 @@ def reload_config():
 
 @router.delete("/cache/{stock_code}")
 def clear_agent_cache(stock_code: str, db: Session = Depends(get_db)):
-    """清除指定股票的 Agent 缓存。"""
+    """清除指定股票的 Agent 缓存和数据源缓存。"""
     count = db.query(AgentResultCache).filter(
         AgentResultCache.stock_code == stock_code,
     ).delete()
+    ds_count = db.query(DataSourceCache).filter(
+        DataSourceCache.stock_code == stock_code,
+    ).delete()
     db.commit()
-    return {"message": f"已清除 {count} 条缓存"}
+    return {"message": f"已清除 {count} 条 Agent 缓存, {ds_count} 条数据源缓存"}

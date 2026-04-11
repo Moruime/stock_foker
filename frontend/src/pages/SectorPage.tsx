@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Card, Tag, Table, Typography, Spin, Alert, Button, Empty, Space, Tooltip } from 'antd';
-import { ReloadOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Card, Tag, Table, Typography, Spin, Alert, Button, Empty, Space, Tooltip, Statistic, Row, Col } from 'antd';
+import { ReloadOutlined, ClockCircleOutlined, FundOutlined, StockOutlined, SyncOutlined } from '@ant-design/icons';
 import { useOutletContext } from 'react-router-dom';
 import { runSectorAgent, clearAgentCache } from '../services/api';
 import type { FocusStock, AgentResult } from '../types';
 import { COLORS } from '../theme';
 import { useAgentCache } from '../contexts/AgentCacheContext';
+import { useDataSource, invalidateDataSourceCache } from '../hooks/useDataSource';
 import SnapshotPanel from '../components/SnapshotPanel';
 
 const { Text, Title, Paragraph } = Typography;
@@ -23,6 +24,10 @@ export default function SectorPage() {
   const [fromCache, setFromCache] = useState(false);
 
   const { getAgentCache, setAgentCache, invalidateStock } = useAgentCache();
+
+  // 独立数据源
+  const industryValuation = useDataSource(focus?.stock_code, focus?.stock_name, 'industry_valuation');
+  const marketData = useDataSource(focus?.stock_code, focus?.stock_name, 'market_data');
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!focus) return;
@@ -54,8 +59,11 @@ export default function SectorPage() {
     if (!focus) return;
     try { await clearAgentCache(focus.stock_code); } catch { /* ignore */ }
     invalidateStock(focus.stock_code);
+    invalidateDataSourceCache(focus.stock_code);
     fetchData(true);
-  }, [focus, invalidateStock, fetchData]);
+    industryValuation.refresh();
+    marketData.refresh();
+  }, [focus, invalidateStock, fetchData, industryValuation, marketData]);
 
   useEffect(() => {
     fetchData();
@@ -73,6 +81,18 @@ export default function SectorPage() {
   const concepts = (d.related_concepts as Record<string, unknown>[]) || [];
   const topPeers = (d.top_peers as Record<string, unknown>[]) || [];
   const analysis = (d.analysis as string) || '';
+
+  // 同花顺原始数据（独立数据源）
+  const industryRow = ((industryValuation.data?.datas as Record<string, unknown>[]) || [])[0] || {};
+  const marketRow = ((marketData.data?.datas as Record<string, unknown>[]) || [])[0] || {};
+  const hasIndustryData = Object.keys(industryRow).length > 0;
+  const hasMarketData = Object.keys(marketRow).length > 0;
+
+  // 从行业数据中提取常用字段（key 含日期后缀，用模糊匹配）
+  const findVal = (row: Record<string, unknown>, keyword: string): number | null => {
+    const key = Object.keys(row).find((k) => k.includes(keyword));
+    return key !== undefined ? (row[key] as number) ?? null : null;
+  };
 
   const trendColor =
     sectorTrend === '上涨' ? COLORS.stockUp :
@@ -134,6 +154,157 @@ export default function SectorPage() {
                 <Paragraph>{analysis}</Paragraph>
               </Card>
             )}
+
+            {/* 行业估值 + 资金流向（独立数据源） */}
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <Card
+                title={
+                  <Space>
+                    <FundOutlined />
+                    <span>行业估值指标</span>
+                    {industryValuation.loading && <SyncOutlined spin style={{ fontSize: 12 }} />}
+                    {industryValuation.timestamp && (
+                      <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
+                        <ClockCircleOutlined style={{ marginRight: 2 }} />
+                        {formatCacheTime(industryValuation.timestamp)}
+                      </Text>
+                    )}
+                  </Space>
+                }
+                size="small"
+                style={{ flex: 1, minWidth: 300 }}
+                extra={
+                  <Tooltip title="刷新行业估值">
+                    <ReloadOutlined
+                      style={{ fontSize: 12, cursor: 'pointer' }}
+                      onClick={() => industryValuation.refresh()}
+                    />
+                  </Tooltip>
+                }
+              >
+                {industryValuation.loading ? (
+                  <Spin size="small" style={{ display: 'block', margin: '16px auto' }} />
+                ) : hasIndustryData ? (
+                    <Row gutter={[16, 12]}>
+                      {findVal(industryRow, '市盈率') !== null && (
+                        <Col span={8}>
+                          <Statistic title="PE (市盈率)" value={findVal(industryRow, '市盈率')!} precision={2} />
+                        </Col>
+                      )}
+                      {findVal(industryRow, '市净率') !== null && (
+                        <Col span={8}>
+                          <Statistic title="PB (市净率)" value={findVal(industryRow, '市净率')!} precision={2} />
+                        </Col>
+                      )}
+                      {findVal(industryRow, '净资产收益率') !== null && (
+                        <Col span={8}>
+                          <Statistic title="ROE" value={findVal(industryRow, '净资产收益率')!} precision={2} suffix="%" />
+                        </Col>
+                      )}
+                      {findVal(industryRow, '行业中值') !== null && (
+                        <Col span={8}>
+                          <Statistic title="PE 行业中值" value={findVal(industryRow, '行业中值')!} precision={2} />
+                        </Col>
+                      )}
+                      {(industryRow['所属同花顺二级行业'] as string) && (
+                        <Col span={8}>
+                          <Text type="secondary">所属行业</Text>
+                          <div><Text strong>{industryRow['所属同花顺二级行业'] as string}</Text></div>
+                        </Col>
+                      )}
+                    </Row>
+                ) : (
+                  <Empty description="暂无行业估值数据" />
+                )}
+              </Card>
+
+              {(() => {
+                  const netInflow = findVal(marketRow, '主力资金流向');
+                  const bigOrder = findVal(marketRow, '大单净买入');
+                  const turnover = findVal(marketRow, '换手率');
+                  const volumeRatio = findVal(marketRow, '量比');
+                  const amount = findVal(marketRow, '成交额');
+                  return (
+                    <Card
+                      title={
+                        <Space>
+                          <StockOutlined />
+                          <span>资金流向</span>
+                          {marketData.loading && <SyncOutlined spin style={{ fontSize: 12 }} />}
+                          {marketData.timestamp && (
+                            <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
+                              <ClockCircleOutlined style={{ marginRight: 2 }} />
+                              {formatCacheTime(marketData.timestamp)}
+                            </Text>
+                          )}
+                        </Space>
+                      }
+                      size="small"
+                      style={{ flex: 1, minWidth: 300 }}
+                      extra={
+                        <Tooltip title="刷新资金流向">
+                          <ReloadOutlined
+                            style={{ fontSize: 12, cursor: 'pointer' }}
+                            onClick={() => marketData.refresh()}
+                          />
+                        </Tooltip>
+                      }
+                    >
+                      {marketData.loading ? (
+                        <Spin size="small" style={{ display: 'block', margin: '16px auto' }} />
+                      ) : hasMarketData ? (
+                      <Row gutter={[16, 12]}>
+                        {netInflow !== null && (
+                          <Col span={8}>
+                            <Statistic
+                              title="主力净流入"
+                              value={netInflow / 10000}
+                              precision={0}
+                              suffix="万"
+                              valueStyle={{ color: netInflow >= 0 ? COLORS.stockUp : COLORS.stockDown }}
+                              prefix={netInflow >= 0 ? '+' : ''}
+                            />
+                          </Col>
+                        )}
+                        {bigOrder !== null && (
+                          <Col span={8}>
+                            <Statistic
+                              title="大单净买入"
+                              value={bigOrder}
+                              precision={0}
+                              suffix="手"
+                              valueStyle={{ color: bigOrder >= 0 ? COLORS.stockUp : COLORS.stockDown }}
+                            />
+                          </Col>
+                        )}
+                        {turnover !== null && (
+                          <Col span={8}>
+                            <Statistic title="换手率" value={turnover} precision={2} suffix="%" />
+                          </Col>
+                        )}
+                        {volumeRatio !== null && (
+                          <Col span={8}>
+                            <Statistic title="量比" value={volumeRatio} precision={2} />
+                          </Col>
+                        )}
+                        {amount !== null && (
+                          <Col span={8}>
+                            <Statistic
+                              title="成交额"
+                              value={amount / 1e8}
+                              precision={2}
+                              suffix="亿"
+                            />
+                          </Col>
+                        )}
+                      </Row>
+                      ) : (
+                        <Empty description="暂无资金流向数据" />
+                      )}
+                    </Card>
+                  );
+                })()}
+            </div>
 
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <Card title="相关概念板块" style={{ flex: 1, minWidth: 300 }}>

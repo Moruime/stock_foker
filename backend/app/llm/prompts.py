@@ -14,6 +14,8 @@ def sentiment_prompt(
     stock_name: str,
     news_data: dict,
     events_data: dict | None = None,
+    hithink_news: dict | None = None,
+    announcements: dict | None = None,
 ) -> list[dict[str, str]]:
     news_section = ""
     if news_data and (news_data.get("datas") or news_data.get("chunks_info")):
@@ -27,11 +29,26 @@ def sentiment_prompt(
 近期重要事件（同花顺问财）:
 {json.dumps(events_data, ensure_ascii=False, indent=2)}
 """
+    hithink_news_section = ""
+    if hithink_news and hithink_news.get("data"):
+        # 截取前 10 条财经资讯避免 Prompt 过长
+        items = hithink_news["data"][:10]
+        hithink_news_section = f"""
+财经资讯搜索结果（同花顺问财）:
+{json.dumps(items, ensure_ascii=False, indent=2)}
+"""
+    announcements_section = ""
+    if announcements and announcements.get("data"):
+        items = announcements["data"][:10]
+        announcements_section = f"""
+最新公告信息（同花顺问财）:
+{json.dumps(items, ensure_ascii=False, indent=2)}
+"""
     return [
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股消息面分析师。根据提供的个股新闻列表和重要事件，分析消息面整体多空情绪，"
+                "你是一名专业的 A 股消息面分析师。根据提供的个股新闻列表、重要事件、财经资讯和公司公告，分析消息面整体多空情绪，"
                 "区分有效信息和噪音，给出结构化的 JSON 分析结果。"
             ),
         },
@@ -40,7 +57,7 @@ def sentiment_prompt(
             "content": f"""请分析以下股票的近期消息面情绪：
 
 股票: {stock_name}({stock_code})
-{news_section}{events_section}
+{news_section}{events_section}{hithink_news_section}{announcements_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "overall_sentiment": <-1.0到1.0的浮点数，负为利空，正为利好>,
@@ -69,11 +86,27 @@ def sector_prompt(
     stock_name: str,
     sector_data: dict,
 ) -> list[dict[str, str]]:
+    industry_valuation = sector_data.pop("industry_valuation", {})
+    market_data = sector_data.pop("market_data", {})
+    valuation_section = ""
+    if industry_valuation and (industry_valuation.get("datas") or industry_valuation.get("chunks_info")):
+        valuation_section = f"""
+
+行业估值数据（同花顺问财）:
+{json.dumps(industry_valuation, ensure_ascii=False, indent=2)}
+"""
+    market_section = ""
+    if market_data and (market_data.get("datas") or market_data.get("chunks_info")):
+        market_section = f"""
+
+主力资金流向数据（同花顺问财）:
+{json.dumps(market_data, ensure_ascii=False, indent=2)}
+"""
     return [
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股板块分析师。根据个股所属板块的数据，分析板块走势、"
+                "你是一名专业的 A 股板块分析师。根据个股所属板块的数据、行业估值指标（PE/PB/ROE等）和主力资金流向，分析板块走势、"
                 "个股在板块中的相对强弱、板块轮动趋势，给出结构化的 JSON 分析结果。"
             ),
         },
@@ -85,7 +118,7 @@ def sector_prompt(
 
 板块数据:
 {json.dumps(sector_data, ensure_ascii=False, indent=2)}
-
+{valuation_section}{market_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "sector_name": "<所属行业板块名称>",
@@ -116,7 +149,8 @@ def macro_prompt(
     stock_info = f"\n关联个股: {stock_name}({stock_code})" if stock_code else ""
     # 所有数据均来自同花顺问财 API
     hithink_macro = macro_data.get("hithink_macro", {})
-    market_data = {k: v for k, v in macro_data.items() if k != "hithink_macro"}
+    hithink_index = macro_data.get("hithink_index", {})
+    market_data = {k: v for k, v in macro_data.items() if k not in ("hithink_macro", "hithink_index")}
     market_section = ""
     if any(v for v in market_data.values() if isinstance(v, dict) and v.get("datas")):
         market_section = f"""
@@ -128,6 +162,12 @@ def macro_prompt(
         hithink_section = f"""
 宏观经济指标（同花顺问财）:
 {json.dumps(hithink_macro, ensure_ascii=False, indent=2)}
+"""
+    index_section = ""
+    if hithink_index and (hithink_index.get("datas") or hithink_index.get("chunks_info")):
+        index_section = f"""
+主要指数实时行情（同花顺问财）:
+{json.dumps(hithink_index, ensure_ascii=False, indent=2)}
 """
     return [
         {
@@ -141,7 +181,7 @@ def macro_prompt(
             "role": "user",
             "content": f"""请分析当前 A 股宏观环境：
 {stock_info}
-{market_section}{hithink_section}
+{market_section}{hithink_section}{index_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "market_phase": "<牛市|熊市|震荡市>",
@@ -172,6 +212,10 @@ def enhanced_advice_prompt(
     position: dict | None,
     fundamental_data: dict | None = None,
     insresearch_data: dict | None = None,
+    reports_data: dict | None = None,
+    business_data: dict | None = None,
+    basicinfo_data: dict | None = None,
+    shareholders_data: dict | None = None,
 ) -> list[dict[str, str]]:
     position_info = json.dumps(position, ensure_ascii=False) if position else "无持仓"
     fundamental_section = ""
@@ -185,6 +229,32 @@ def enhanced_advice_prompt(
         insresearch_section = f"""
 八、机构评级与研究（同花顺问财）:
 {json.dumps(insresearch_data, ensure_ascii=False, indent=2)}
+"""
+    reports_section = ""
+    if reports_data and reports_data.get("data"):
+        # 截取前 5 条研报避免 Prompt 过长
+        items = reports_data["data"][:5]
+        reports_section = f"""
+九、最新研究报告（同花顺问财）:
+{json.dumps(items, ensure_ascii=False, indent=2)}
+"""
+    business_section = ""
+    if business_data and (business_data.get("datas") or business_data.get("chunks_info")):
+        business_section = f"""
+十、公司经营数据（同花顺问财）:
+{json.dumps(business_data, ensure_ascii=False, indent=2)}
+"""
+    basicinfo_section = ""
+    if basicinfo_data and (basicinfo_data.get("datas") or basicinfo_data.get("chunks_info")):
+        basicinfo_section = f"""
+十一、公司基本资料（同花顺问财）:
+{json.dumps(basicinfo_data, ensure_ascii=False, indent=2)}
+"""
+    shareholders_section = ""
+    if shareholders_data and (shareholders_data.get("datas") or shareholders_data.get("chunks_info")):
+        shareholders_section = f"""
+十二、股东股本信息（同花顺问财）:
+{json.dumps(shareholders_data, ensure_ascii=False, indent=2)}
 """
     return [
         {
@@ -222,7 +292,7 @@ def enhanced_advice_prompt(
 
 六、当前持仓:
 {position_info}
-{fundamental_section}{insresearch_section}
+{fundamental_section}{insresearch_section}{reports_section}{business_section}{basicinfo_section}{shareholders_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "signal": "<buy|sell|hold>",

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Card, Tag, List, Typography, Spin, Alert, Button, Empty, Space, Tooltip } from 'antd';
-import { ReloadOutlined, RiseOutlined, FallOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Card, Tag, List, Typography, Spin, Alert, Button, Empty, Space, Tooltip, Row, Col } from 'antd';
+import { ReloadOutlined, RiseOutlined, FallOutlined, ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
 import { useOutletContext } from 'react-router-dom';
 import { runMacroAgent, clearAgentCache } from '../services/api';
 import type { FocusStock, AgentResult } from '../types';
 import { COLORS } from '../theme';
 import { useAgentCache } from '../contexts/AgentCacheContext';
+import { useDataSource, invalidateDataSourceCache } from '../hooks/useDataSource';
 import SnapshotPanel from '../components/SnapshotPanel';
 
 const { Text, Title, Paragraph } = Typography;
@@ -23,6 +24,9 @@ export default function MacroPage() {
   const [fromCache, setFromCache] = useState(false);
 
   const { getAgentCache, setAgentCache, invalidateStock } = useAgentCache();
+
+  // 独立数据源
+  const hithinkIndex = useDataSource(focus?.stock_code, focus?.stock_name, 'hithink_index');
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!focus) return;
@@ -54,8 +58,10 @@ export default function MacroPage() {
     if (!focus) return;
     try { await clearAgentCache(focus.stock_code); } catch { /* ignore */ }
     invalidateStock(focus.stock_code);
+    invalidateDataSourceCache(focus.stock_code);
     fetchData(true);
-  }, [focus, invalidateStock, fetchData]);
+    hithinkIndex.refresh();
+  }, [focus, invalidateStock, fetchData, hithinkIndex]);
 
   useEffect(() => {
     fetchData();
@@ -72,6 +78,13 @@ export default function MacroPage() {
   const keyIndicators = (d.key_indicators as Record<string, unknown>[]) || [];
   const impactOnStock = (d.impact_on_stock as string) || '';
   const analysis = (d.analysis as string) || '';
+
+  // 同花顺指数原始数据（独立数据源）
+  const indexRows = ((hithinkIndex.data?.datas as Record<string, unknown>[]) || []);
+  const findIndexVal = (row: Record<string, unknown>, keyword: string): number | null => {
+    const key = Object.keys(row).find((k) => k.includes(keyword));
+    return key !== undefined ? (row[key] as number) ?? null : null;
+  };
 
   const riskColor =
     riskLevel === '高' ? COLORS.stockUp :
@@ -131,6 +144,75 @@ export default function MacroPage() {
                 </Title>
               </Card>
             </div>
+
+            {/* 主要指数行情（独立数据源） */}
+            <Card
+              title={
+                <Space>
+                  <span>主要指数行情</span>
+                  {hithinkIndex.loading && <SyncOutlined spin style={{ fontSize: 12 }} />}
+                  {hithinkIndex.timestamp && (
+                    <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
+                      <ClockCircleOutlined style={{ marginRight: 2 }} />
+                      {formatCacheTime(hithinkIndex.timestamp)}
+                    </Text>
+                  )}
+                </Space>
+              }
+              size="small"
+              extra={
+                <Tooltip title="刷新指数行情">
+                  <ReloadOutlined
+                    style={{ fontSize: 12, cursor: 'pointer' }}
+                    onClick={() => hithinkIndex.refresh()}
+                  />
+                </Tooltip>
+              }
+            >
+              {hithinkIndex.loading ? (
+                <Spin size="small" style={{ display: 'block', margin: '16px auto' }} />
+              ) : indexRows.length > 0 ? (
+                <Row gutter={[16, 12]}>
+                  {indexRows.map((row, i) => {
+                    const name = (row['指数简称'] as string) || `指数${i + 1}`;
+                    const price = findIndexVal(row, '收盘价') ?? findIndexVal(row, '最新价') ?? (row['最新价'] as number);
+                    const changePct = findIndexVal(row, '涨跌幅');
+                    const amount = findIndexVal(row, '成交额');
+                    return (
+                      <Col span={8} key={i}>
+                        <Card size="small" style={{ textAlign: 'center' }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{name}</Text>
+                          {price !== null && (
+                            <div>
+                              <Text strong style={{ fontSize: 20 }}>{price.toFixed(2)}</Text>
+                            </div>
+                          )}
+                          {changePct !== null && (
+                            <div>
+                              <Text style={{
+                                color: changePct > 0 ? COLORS.stockUp : changePct < 0 ? COLORS.stockDown : COLORS.stockFlat,
+                                fontSize: 14,
+                              }}>
+                                {changePct > 0 ? '+' : ''}{changePct.toFixed(2)}%
+                              </Text>
+                            </div>
+                          )}
+                          {amount !== null && (
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>
+                                成交 {(amount / 1e8).toFixed(0)}亿
+                              </Text>
+                            </div>
+                          )}
+                        </Card>
+                      </Col>
+                    );
+                  })}
+                </Row>
+              ) : (
+                <Empty description="暂无指数数据" />
+              )}
+            </Card>
 
             {keyIndicators.length > 0 && (
               <Card title="关键指标">

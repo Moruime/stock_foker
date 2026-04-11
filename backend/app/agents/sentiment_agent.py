@@ -6,19 +6,37 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import sentiment_prompt
-from app.services.data_fetcher import fetch_stock_news, fetch_hithink_events
+from app.services.data_fetcher import fetch_stock_news, fetch_hithink_events, parallel_fetch
 
 
 class SentimentAgent(BaseAgent):
     agent_name = "sentiment"
 
     def fetch_data(self, **kwargs: Any) -> dict:
+        stock_code: str = kwargs.get("stock_code", "")
         stock_name: str = kwargs.get("stock_name", "")
-        news_data = fetch_stock_news(stock_name)
-        events_data = fetch_hithink_events(stock_name)
+        db = kwargs.get("db")
+
+        # 非缓存数据源（仅供 LLM 分析使用，不需要独立展示）
+        base_results = parallel_fetch({
+            "news_data": (fetch_stock_news, (stock_name,)),
+            "events_data": (fetch_hithink_events, (stock_name,)),
+        })
+
+        # 使用数据源缓存服务获取资讯和公告（支持独立缓存）
+        if db:
+            from app.services.data_source_service import get_data_source
+            hithink_news, _, _ = get_data_source(db, stock_code, stock_name, "hithink_news")
+            announcements, _, _ = get_data_source(db, stock_code, stock_name, "announcements")
+        else:
+            from app.services.data_fetcher import fetch_hithink_news, fetch_hithink_announcements
+            hithink_news = fetch_hithink_news(stock_name)
+            announcements = fetch_hithink_announcements(stock_name)
+
         return {
-            "news_data": news_data,
-            "events_data": events_data,
+            **base_results,
+            "hithink_news": hithink_news,
+            "announcements": announcements,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -27,6 +45,8 @@ class SentimentAgent(BaseAgent):
             stock_name=kwargs["stock_name"],
             news_data=raw_data["news_data"],
             events_data=raw_data.get("events_data", {}),
+            hithink_news=raw_data.get("hithink_news", {}),
+            announcements=raw_data.get("announcements", {}),
         )
 
     def parse_response(self, llm_output: dict, *, raw_data: dict, **kwargs: Any) -> dict:

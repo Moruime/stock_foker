@@ -6,22 +6,39 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import macro_prompt
-from app.services.data_fetcher import fetch_index_data, fetch_north_flow, fetch_market_overview, fetch_hithink_macro_indicators
+from app.services.data_fetcher import fetch_index_data, fetch_north_flow, fetch_market_overview, fetch_hithink_macro_indicators, fetch_hithink_index_data, parallel_fetch
 
 
 class MacroAgent(BaseAgent):
     agent_name = "macro"
 
     def fetch_data(self, **kwargs: Any) -> dict:
-        index_data = fetch_index_data()
-        north_flow = fetch_north_flow()
-        market_overview = fetch_market_overview()
-        hithink_macro = fetch_hithink_macro_indicators()
+        stock_code: str = kwargs.get("stock_code", "")
+        stock_name: str = kwargs.get("stock_name", "")
+        db = kwargs.get("db")
+
+        # 非缓存数据源
+        base_results = parallel_fetch({
+            "index_data": (fetch_index_data, ()),
+            "north_flow": (fetch_north_flow, ()),
+            "market_overview": (fetch_market_overview, ()),
+            "hithink_macro": (fetch_hithink_macro_indicators, ()),
+        })
+        base_results.setdefault("index_data", {})
+        base_results.setdefault("north_flow", {})
+        base_results.setdefault("market_overview", {})
+
+        # 使用数据源缓存服务获取指数行情
+        if db:
+            from app.services.data_source_service import get_data_source
+            # hithink_index 不依赖 stock_code，但用 stock_code 作为缓存 key
+            hithink_index, _, _ = get_data_source(db, stock_code or "__GLOBAL__", stock_name, "hithink_index")
+        else:
+            hithink_index = fetch_hithink_index_data()
+
         return {
-            "index_data": index_data or {},
-            "north_flow": north_flow or {},
-            "market_overview": market_overview or {},
-            "hithink_macro": hithink_macro,
+            **base_results,
+            "hithink_index": hithink_index,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:

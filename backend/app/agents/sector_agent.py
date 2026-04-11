@@ -6,19 +6,38 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import sector_prompt
-from app.services.data_fetcher import fetch_industry_board, fetch_concept_boards
+from app.services.data_fetcher import fetch_industry_board, fetch_concept_boards, fetch_hithink_industry_data, fetch_hithink_market_data, parallel_fetch
 
 
 class SectorAgent(BaseAgent):
     agent_name = "sector"
 
     def fetch_data(self, **kwargs: Any) -> dict:
+        stock_code: str = kwargs.get("stock_code", "")
         stock_name: str = kwargs.get("stock_name", "")
-        industry = fetch_industry_board(stock_name)
-        concepts = fetch_concept_boards()
+        db = kwargs.get("db")
+
+        # 非缓存数据源
+        base_results = parallel_fetch({
+            "industry": (fetch_industry_board, (stock_name,)),
+            "concepts": (fetch_concept_boards, ()),
+        })
+        base_results.setdefault("industry", {})
+        base_results.setdefault("concepts", {})
+
+        # 使用数据源缓存服务获取行业估值和资金流向
+        if db:
+            from app.services.data_source_service import get_data_source
+            industry_val, _, _ = get_data_source(db, stock_code, stock_name, "industry_valuation")
+            market_data, _, _ = get_data_source(db, stock_code, stock_name, "market_data")
+        else:
+            industry_val = fetch_hithink_industry_data(stock_name)
+            market_data = fetch_hithink_market_data(stock_name)
+
         return {
-            "industry": industry or {},
-            "concepts": concepts or {},
+            **base_results,
+            "industry_valuation": industry_val,
+            "market_data": market_data,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
