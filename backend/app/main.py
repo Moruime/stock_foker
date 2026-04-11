@@ -1,4 +1,6 @@
 import logging
+import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 
@@ -36,11 +38,25 @@ from app.routers.agent_router import router as agent_router
 from app.routers.snapshot_router import router as snapshot_router
 from app.routers.data_source_router import router as data_source_router
 
-app = FastAPI(title="Stock Foker API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: 替代已弃用的 on_event('startup')。"""
+    init_db()
+    _unify_uvicorn_log_format()
+    yield
+
+
+app = FastAPI(title="Stock Foker API", version="0.1.0", lifespan=lifespan)
+
+_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+).split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,12 +66,6 @@ app.include_router(stock_router)
 app.include_router(agent_router)
 app.include_router(snapshot_router)
 app.include_router(data_source_router)
-
-
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    _unify_uvicorn_log_format()
 
 
 @app.get("/")

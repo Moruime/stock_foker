@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.database import get_db
+from app.db.database import get_db, SessionLocal
 from app.models.models import AgentResultCache, DailyAgentSnapshot, FocusStock, DataSourceCache
 from app.models.schemas import (
     AgentResultResponse,
@@ -118,6 +118,16 @@ def _save_cache(db: Session, result: dict, stock_code: str) -> None:
 def _run_agent(agent, **kwargs) -> dict:
     """执行单个 Agent 并返回 dict。"""
     return agent.execute(**kwargs).to_dict()
+
+
+def _run_agent_in_thread(agent, **kwargs) -> dict:
+    """在独立线程中执行 Agent（创建独立 DB Session 避免跨线程共享）。"""
+    thread_db = SessionLocal()
+    try:
+        kwargs["db"] = thread_db
+        return agent.execute(**kwargs).to_dict()
+    finally:
+        thread_db.close()
 
 
 # ------------------------------------------------------------------
@@ -284,11 +294,10 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
                 executor.submit(
-                    _run_agent,
+                    _run_agent_in_thread,
                     agent_tuple[0],
                     stock_code=stock_code,
                     stock_name=stock_name,
-                    db=db,
                 ): name
                 for name, agent_tuple in agents_to_run.items()
             }
@@ -297,6 +306,7 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
                 try:
                     result = future.result()
                     upstream_results[name] = result
+                    # 使用主线程 db 写缓存和快照
                     _save_cache(db, result, stock_code)
                     _save_snapshot(db, result, stock_code)
                 except Exception as e:

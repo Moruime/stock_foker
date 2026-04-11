@@ -35,6 +35,13 @@ def _retry_call(fn, retries: int = 3, delay: float = 2.0):
 _stock_list_cache: list[dict] | None = None
 _index_list_cache: list[dict] | None = None
 _etf_list_cache: list[dict] | None = None
+_cache_ts: dict[str, float] = {}          # 各缓存的加载时间戳
+_CACHE_TTL: float = 4 * 3600               # 缓存有效期 4 小时
+
+
+def _cache_expired(key: str) -> bool:
+    ts = _cache_ts.get(key)
+    return ts is None or (time.time() - ts) > _CACHE_TTL
 
 # 上交所指数代码前缀（000/880 等由上交所发布）
 _SH_INDEX_PREFIXES = ("000", "880")
@@ -43,7 +50,7 @@ _SH_INDEX_PREFIXES = ("000", "880")
 def _load_stock_list() -> list[dict]:
     """加载并缓存 A 股股票列表"""
     global _stock_list_cache
-    if _stock_list_cache is not None:
+    if _stock_list_cache is not None and not _cache_expired("stock"):
         return _stock_list_cache
     try:
         df = _retry_call(ak.stock_info_a_code_name)
@@ -51,6 +58,7 @@ def _load_stock_list() -> list[dict]:
             {"stock_code": str(row["code"]), "stock_name": str(row["name"]), "type": "stock"}
             for _, row in df.iterrows()
         ]
+        _cache_ts["stock"] = time.time()
         return _stock_list_cache
     except Exception:
         return []
@@ -59,7 +67,7 @@ def _load_stock_list() -> list[dict]:
 def _load_index_list() -> list[dict]:
     """加载并缓存 A 股主要指数列表"""
     global _index_list_cache
-    if _index_list_cache is not None:
+    if _index_list_cache is not None and not _cache_expired("index"):
         return _index_list_cache
     try:
         df = _retry_call(ak.index_stock_info)
@@ -67,6 +75,7 @@ def _load_index_list() -> list[dict]:
             {"stock_code": str(row["index_code"]), "stock_name": str(row["display_name"]), "type": "index"}
             for _, row in df.iterrows()
         ]
+        _cache_ts["index"] = time.time()
         return _index_list_cache
     except Exception:
         return []
@@ -81,7 +90,7 @@ def is_index_code(stock_code: str) -> bool:
 def _load_etf_list() -> list[dict]:
     """加载并缓存 ETF 基金列表"""
     global _etf_list_cache
-    if _etf_list_cache is not None:
+    if _etf_list_cache is not None and not _cache_expired("etf"):
         return _etf_list_cache
     try:
         df = _retry_call(lambda: ak.fund_etf_category_sina(symbol="ETF基金"))
@@ -93,6 +102,7 @@ def _load_etf_list() -> list[dict]:
             }
             for _, row in df.iterrows()
         ]
+        _cache_ts["etf"] = time.time()
         return _etf_list_cache
     except Exception:
         return []
@@ -307,10 +317,20 @@ def _get_kline_with_cache(stock_code: str, period: str, db) -> list[dict]:
                     "high": item["high"],
                     "low": item["low"],
                     "volume": item["volume"],
+                    "turnover": item.get("turnover", 0.0),
                 })
 
     if new_rows:
         db.add_all(new_rows)
+
+    # 清理过旧的缓存记录（仅保留最近 400 天）
+    cutoff = (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d")
+    db.query(KlineCache).filter(
+        KlineCache.stock_code == stock_code,
+        KlineCache.period == period,
+        KlineCache.date < cutoff,
+    ).delete(synchronize_session=False)
+
     db.commit()
 
     # 5. 合并返回：用远程数据（更完整）

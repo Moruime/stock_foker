@@ -71,6 +71,8 @@ class LLMClient:
             except Exception as e:
                 last_err = e
                 logger.warning("LLM 调用失败 (attempt %d): %s", attempt + 1, e)
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # 指数退避: 1s, 2s
 
         raise RuntimeError(f"LLM 调用失败: {last_err}")
 

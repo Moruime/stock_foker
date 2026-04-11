@@ -30,6 +30,9 @@ interface CacheEntry {
 
 const _memCache = new Map<string, CacheEntry>();
 
+/** 数据源缓存上限（每只股票约 12 类数据源） */
+const MAX_DS_ENTRIES = 240; // ≈ 20 只股票 × 12 源
+
 function _cacheKey(stockCode: string, sourceType: string): string {
   return `${stockCode}:ds:${sourceType}`;
 }
@@ -55,6 +58,14 @@ function _setMemCache(stockCode: string, sourceType: string, data: Record<string
     timestamp,
     cachedAt: Date.now(),
   });
+  // 超过上限时淘汰最旧条目
+  if (_memCache.size > MAX_DS_ENTRIES) {
+    const entries = [..._memCache.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+    const toRemove = _memCache.size - MAX_DS_ENTRIES + 12; // 批量清理 12 条
+    for (let i = 0; i < toRemove && i < entries.length; i++) {
+      _memCache.delete(entries[i][0]);
+    }
+  }
 }
 
 /** 清除指定股票的所有数据源内存缓存 */

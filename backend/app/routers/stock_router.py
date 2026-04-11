@@ -33,6 +33,7 @@ def set_focus_stock(data: FocusStockCreate, db: Session = Depends(get_db)):
     db.query(FocusStock).filter(FocusStock.is_active == 1).update(
         {"is_active": 0}
     )
+    db.flush()  # 确保 update 落地后再 insert，防止并发请求产生多条 active
     stock = FocusStock(
         stock_code=data.stock_code,
         stock_name=data.stock_name,
@@ -274,10 +275,34 @@ def update_trade(
 
 @router.delete("/trades/{trade_id}")
 def delete_trade(trade_id: int, db: Session = Depends(get_db)):
-    """删除交易记录"""
+    """删除交易记录，实时模式记录会反向调整持仓"""
     record = db.query(TradeRecord).filter(TradeRecord.id == trade_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="交易记录不存在")
+
+    # 实时交易模式：反向调整持仓
+    if record.record_mode == RecordMode.REALTIME:
+        position = db.query(StockPosition).filter(
+            StockPosition.stock_code == record.stock_code
+        ).first()
+        if position:
+            if record.trade_type.value == "buy":
+                # 删除买入记录 → 减仓
+                if position.quantity >= record.quantity:
+                    if position.quantity == record.quantity:
+                        # 持仓清零时按原价还原成本无意义，直接删持仓
+                        db.delete(position)
+                    else:
+                        old_total = position.cost_price * position.quantity
+                        new_quantity = position.quantity - record.quantity
+                        position.cost_price = (
+                            (old_total - record.price * record.quantity) / new_quantity
+                        )
+                        position.quantity = new_quantity
+            elif record.trade_type.value == "sell":
+                # 删除卖出记录 → 加回持仓
+                position.quantity += record.quantity
+
     db.delete(record)
     db.commit()
     return {"message": "删除成功"}

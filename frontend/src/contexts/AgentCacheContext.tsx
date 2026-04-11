@@ -55,6 +55,22 @@ function cacheKey(stockCode: string, agentType: AgentType): string {
   return `${stockCode}:${agentType}`;
 }
 
+/** 最多缓存的股票数量（每只 4 类 Agent） */
+const MAX_STOCKS = 20;
+
+/** 当缓存超过上限时，淘汰最早的条目 */
+function _evictIfNeeded(store: Map<string, CacheEntry>): void {
+  // 每只股票最多 4 个 key，上限 = MAX_STOCKS * 4
+  if (store.size <= MAX_STOCKS * 4) return;
+  // 按 cachedAt 升序排序，删除最旧的 4 个（即最旧一只股票）
+  const entries = [...store.entries()].sort(
+    (a, b) => new Date(a[1].cachedAt).getTime() - new Date(b[1].cachedAt).getTime(),
+  );
+  for (let i = 0; i < 4 && i < entries.length; i++) {
+    store.delete(entries[i][0]);
+  }
+}
+
 // ------------------------------------------------------------------ context
 
 const AgentCacheContext = createContext<AgentCacheContextValue | null>(null);
@@ -86,6 +102,7 @@ export function AgentCacheProvider({ children }: { children: ReactNode }) {
         value: { type: 'agent', data },
         cachedAt: data.timestamp || new Date().toISOString(),
       });
+      _evictIfNeeded(storeRef.current);
     },
     [],
   );
@@ -95,6 +112,7 @@ export function AgentCacheProvider({ children }: { children: ReactNode }) {
       value: { type: 'enhanced', data },
       cachedAt: data.enhanced_advice?.timestamp || new Date().toISOString(),
     });
+    _evictIfNeeded(storeRef.current);
   }, []);
 
   const invalidateStock = useCallback((stockCode: string): void => {

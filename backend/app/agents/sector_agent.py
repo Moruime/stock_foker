@@ -34,7 +34,7 @@ class SectorAgent(BaseAgent):
             industry_val = fetch_hithink_industry_data(stock_name)
             market_data = fetch_hithink_market_data(stock_name)
             industry_fin = fetch_hithink_industry_finance(stock_name)
-            concepts_data = fetch_concept_boards()
+            concepts_data = fetch_concept_boards(stock_name)
 
         return {
             **base_results,

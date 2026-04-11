@@ -32,10 +32,10 @@ class FocusStock(Base):
     __tablename__ = "focus_stock"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    stock_code = Column(String(10), nullable=False)
+    stock_code = Column(String(10), nullable=False, index=True)
     stock_name = Column(String(50), nullable=False)
     time_frame = Column(SAEnum(TimeFrame), default=TimeFrame.SHORT)
-    is_active = Column(Integer, default=1)
+    is_active = Column(Integer, default=1, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -45,7 +45,7 @@ class TradeRecord(Base):
     __tablename__ = "trade_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    stock_code = Column(String(10), nullable=False)
+    stock_code = Column(String(10), nullable=False, index=True)
     stock_name = Column(String(50), nullable=False)
     trade_type = Column(SAEnum(TradeType), nullable=False)
     price = Column(Float, nullable=False)

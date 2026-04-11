@@ -23,7 +23,7 @@ def _check_agent_type(agent_type: str) -> None:
     if agent_type not in _VALID_AGENT_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"agent_type 必须为 sentiment / sector / macro，收到: {agent_type}",
+            detail=f"agent_type 必须为 {' / '.join(sorted(_VALID_AGENT_TYPES))}，收到: {agent_type}",
         )
 
 

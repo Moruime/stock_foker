@@ -73,15 +73,15 @@ def _cache_key_today() -> str:
 # 缓存读写
 # ------------------------------------------------------------------
 
-def _get_cached_source(db: Session, stock_code: str, source_type: str) -> dict | None:
-    """查询新鲜缓存（09:00 边界后生成的数据）。"""
+def _get_cached_source(db: Session, stock_code: str, source_type: str) -> tuple[dict, datetime] | None:
+    """查询新鲜缓存（09:00 边界后生成的数据）。返回 (data, created_at) 或 None。"""
     row = db.query(DataSourceCache).filter(
         DataSourceCache.stock_code == stock_code,
         DataSourceCache.source_type == source_type,
         DataSourceCache.created_at >= _last_9am(),
     ).order_by(DataSourceCache.created_at.desc()).first()
     if row:
-        return json.loads(row.data)
+        return json.loads(row.data), row.created_at
     return None
 
 
@@ -137,14 +137,8 @@ def get_data_source(
     if not force_refresh:
         cached = _get_cached_source(db, stock_code, source_type)
         if cached is not None:
-            # 读取时间戳
-            row = db.query(DataSourceCache.created_at).filter(
-                DataSourceCache.stock_code == stock_code,
-                DataSourceCache.source_type == source_type,
-                DataSourceCache.created_at >= _last_9am(),
-            ).order_by(DataSourceCache.created_at.desc()).first()
-            ts = row[0] if row else datetime.now()
-            return cached, ts, True
+            data, ts = cached
+            return data, ts, True
 
     # 调用 API
     fetch_fn, needs_name = _SOURCE_REGISTRY[source_type]
@@ -163,13 +157,4 @@ def get_data_source_cached_only(
     source_type: str,
 ) -> tuple[dict, datetime] | None:
     """仅查询缓存，不触发 API 调用。未命中返回 None。"""
-    cached = _get_cached_source(db, stock_code, source_type)
-    if cached is None:
-        return None
-    row = db.query(DataSourceCache.created_at).filter(
-        DataSourceCache.stock_code == stock_code,
-        DataSourceCache.source_type == source_type,
-        DataSourceCache.created_at >= _last_9am(),
-    ).order_by(DataSourceCache.created_at.desc()).first()
-    ts = row[0] if row else datetime.now()
-    return cached, ts
+    return _get_cached_source(db, stock_code, source_type)
