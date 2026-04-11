@@ -227,9 +227,14 @@ def fetch_industry_board(stock_name: str) -> dict:
     )
 
 
-def fetch_concept_boards() -> dict:
-    """获取今日热门概念板块（同花顺问财）。"""
-    return _call_hithink_api("今日涨幅最大的概念板块前10 涨跌幅", limit=10)
+def fetch_concept_boards(stock_name: str) -> dict:
+    """获取个股所属概念板块（含成份股数量用于关联度衡量）。"""
+    if not stock_name:
+        return {}
+    return _call_hithink_api(
+        f"{stock_name}所属概念板块 涨跌幅 成份股数量",
+        limit=20,
+    )
 
 
 def fetch_hithink_industry_data(stock_name: str) -> dict:
@@ -244,6 +249,26 @@ def fetch_hithink_market_data(stock_name: str) -> dict:
     if not stock_name:
         return {}
     return _call_hithink_api(f"{stock_name}主力资金净流入 大单净量 换手率 量比", limit=5)
+
+
+def fetch_hithink_industry_finance(stock_name: str) -> dict:
+    """获取个股所属行业财务概况（营收增速、净利润增速、毛利率、行业排名等）。"""
+    if not stock_name:
+        return {}
+    return _call_hithink_api(
+        f"{stock_name}所属行业 行业营业收入增长率 行业净利润增长率 行业毛利率 行业净利率 行业排名",
+        limit=10,
+    )
+
+
+def fetch_hithink_industry_peers(stock_name: str) -> dict:
+    """获取个股所属行业市值龙头（涨跌幅、市盈率、市值、主力资金等）。"""
+    if not stock_name:
+        return {}
+    return _call_hithink_api(
+        f"{stock_name}同行业个股 市值从大到小 涨跌幅 市盈率 总市值 主力资金流向",
+        limit=10,
+    )
 
 
 # ------------------------------------------------------------------

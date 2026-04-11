@@ -107,7 +107,7 @@ export default function MainLayout() {
       setSearchOptions(
         results.map((s) => ({
           value: `${s.stock_code} ${s.stock_name}`,
-          label: `${s.stock_code} - ${s.stock_name}`,
+          label: `${s.stock_code} - ${s.stock_name}${s.type === 'index' ? ' [指数]' : s.type === 'etf' ? ' [ETF]' : ''}`,
           data: s,
         })),
       );
@@ -155,6 +155,27 @@ export default function MainLayout() {
 
   const handleDismissPending = () => {
     setPendingStock(null);
+  };
+
+  const handleReturnToWatched = async () => {
+    try {
+      const active = await getFocusStock();
+      if (active) {
+        setFocus(active);
+      } else if (watchlist.length > 0) {
+        // 没有 active 的，切换到 watchlist 第一个
+        const first = watchlist[0];
+        const result = await setFocusStock({
+          stock_code: first.stock_code,
+          stock_name: first.stock_name,
+          time_frame: focus?.time_frame || 'short',
+        });
+        setFocus(result);
+        await loadWatchlist();
+      }
+    } catch {
+      message.error('返回关注失败');
+    }
   };
 
   const handleSwitchStock = async (stockCode: string) => {
@@ -285,11 +306,16 @@ export default function MainLayout() {
           {/* 右侧：关注列表切换 + 搜索按钮 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
             {/* 关注列表切换 */}
+            {focus?.is_active === 0 && (
+              <Button size="small" type="link" onClick={handleReturnToWatched}>
+                ← 返回关注
+              </Button>
+            )}
             {watchlist.length > 1 && (
               <Space size={4}>
                 <SwapOutlined style={{ color: COLORS.textSecondary, fontSize: 13 }} />
                 <Select
-                  value={focus?.stock_code}
+                  value={focus?.is_active !== 0 ? focus?.stock_code : undefined}
                   options={watchlistOptions}
                   onChange={handleSwitchStock}
                   style={{ width: 160 }}

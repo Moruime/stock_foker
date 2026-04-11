@@ -6,7 +6,7 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import sector_prompt
-from app.services.data_fetcher import fetch_industry_board, fetch_concept_boards, fetch_hithink_industry_data, fetch_hithink_market_data, parallel_fetch
+from app.services.data_fetcher import fetch_industry_board, fetch_concept_boards, fetch_hithink_industry_data, fetch_hithink_market_data, fetch_hithink_industry_finance, parallel_fetch
 
 
 class SectorAgent(BaseAgent):
@@ -17,27 +17,31 @@ class SectorAgent(BaseAgent):
         stock_name: str = kwargs.get("stock_name", "")
         db = kwargs.get("db")
 
-        # 非缓存数据源
+        # 非缓存数据源（行业板块只用于 LLM 分析）
         base_results = parallel_fetch({
             "industry": (fetch_industry_board, (stock_name,)),
-            "concepts": (fetch_concept_boards, ()),
         })
         base_results.setdefault("industry", {})
-        base_results.setdefault("concepts", {})
 
-        # 使用数据源缓存服务获取行业估值和资金流向
+        # 使用数据源缓存服务获取行业估值、资金流向、行业财务和概念板块
         if db:
             from app.services.data_source_service import get_data_source
             industry_val, _, _ = get_data_source(db, stock_code, stock_name, "industry_valuation")
             market_data, _, _ = get_data_source(db, stock_code, stock_name, "market_data")
+            industry_fin, _, _ = get_data_source(db, stock_code, stock_name, "industry_finance")
+            concepts_data, _, _ = get_data_source(db, stock_code, stock_name, "concept_boards")
         else:
             industry_val = fetch_hithink_industry_data(stock_name)
             market_data = fetch_hithink_market_data(stock_name)
+            industry_fin = fetch_hithink_industry_finance(stock_name)
+            concepts_data = fetch_concept_boards()
 
         return {
             **base_results,
+            "concepts": concepts_data,
             "industry_valuation": industry_val,
             "market_data": market_data,
+            "industry_finance": industry_fin,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -61,6 +65,7 @@ class SectorAgent(BaseAgent):
             "sector_trend": llm_output.get("sector_trend", "震荡"),
             "relative_strength": llm_output.get("relative_strength", 0),
             "sector_rotation_signal": llm_output.get("sector_rotation_signal", "稳定"),
+            "industry_rank": llm_output.get("industry_rank", ""),
             "related_concepts": llm_output.get("related_concepts", []),
             "top_peers": llm_peers,
             "analysis": llm_output.get("analysis", ""),
@@ -72,6 +77,7 @@ class SectorAgent(BaseAgent):
             "sector_trend": "震荡",
             "relative_strength": 0,
             "sector_rotation_signal": "稳定",
+            "industry_rank": "",
             "related_concepts": [],
             "top_peers": [],
             "analysis": "AI 分析不可用，无法获取板块数据。",

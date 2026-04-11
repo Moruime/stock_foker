@@ -127,7 +127,7 @@ def _run_agent(agent, **kwargs) -> dict:
 # 每种 Agent 需要保存到快照的关键字段
 _SNAPSHOT_FIELDS: dict[str, list[str]] = {
     "sentiment": ["overall_sentiment", "sentiment_label", "raw_news_count", "noise_ratio", "analysis"],
-    "sector":    ["sector_name", "sector_trend", "relative_strength", "sector_rotation_signal", "analysis"],
+    "sector":    ["sector_name", "sector_trend", "relative_strength", "sector_rotation_signal", "industry_rank", "analysis"],
     "macro":     ["market_phase", "market_sentiment", "risk_level", "impact_on_stock", "analysis"],
     "enhanced_advice": ["signal", "confidence", "summary", "position_advice", "reasoning", "risk_warnings", "dimension_scores"],
 }

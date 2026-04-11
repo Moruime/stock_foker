@@ -33,6 +33,11 @@ def _retry_call(fn, retries: int = 3, delay: float = 2.0):
 
 
 _stock_list_cache: list[dict] | None = None
+_index_list_cache: list[dict] | None = None
+_etf_list_cache: list[dict] | None = None
+
+# 上交所指数代码前缀（000/880 等由上交所发布）
+_SH_INDEX_PREFIXES = ("000", "880")
 
 
 def _load_stock_list() -> list[dict]:
@@ -43,7 +48,7 @@ def _load_stock_list() -> list[dict]:
     try:
         df = _retry_call(ak.stock_info_a_code_name)
         _stock_list_cache = [
-            {"stock_code": str(row["code"]), "stock_name": str(row["name"])}
+            {"stock_code": str(row["code"]), "stock_name": str(row["name"]), "type": "stock"}
             for _, row in df.iterrows()
         ]
         return _stock_list_cache
@@ -51,12 +56,63 @@ def _load_stock_list() -> list[dict]:
         return []
 
 
+def _load_index_list() -> list[dict]:
+    """加载并缓存 A 股主要指数列表"""
+    global _index_list_cache
+    if _index_list_cache is not None:
+        return _index_list_cache
+    try:
+        df = _retry_call(ak.index_stock_info)
+        _index_list_cache = [
+            {"stock_code": str(row["index_code"]), "stock_name": str(row["display_name"]), "type": "index"}
+            for _, row in df.iterrows()
+        ]
+        return _index_list_cache
+    except Exception:
+        return []
+
+
+def is_index_code(stock_code: str) -> bool:
+    """判断代码是否为指数（供外部模块调用）"""
+    indices = _load_index_list()
+    return any(idx["stock_code"] == stock_code for idx in indices)
+
+
+def _load_etf_list() -> list[dict]:
+    """加载并缓存 ETF 基金列表"""
+    global _etf_list_cache
+    if _etf_list_cache is not None:
+        return _etf_list_cache
+    try:
+        df = _retry_call(lambda: ak.fund_etf_category_sina(symbol="ETF基金"))
+        _etf_list_cache = [
+            {
+                "stock_code": str(row["代码"])[2:],  # 去掉 sh/sz 前缀
+                "stock_name": str(row["名称"]),
+                "type": "etf",
+            }
+            for _, row in df.iterrows()
+        ]
+        return _etf_list_cache
+    except Exception:
+        return []
+
+
+def is_etf_code(stock_code: str) -> bool:
+    """判断代码是否为 ETF"""
+    etfs = _load_etf_list()
+    return any(e["stock_code"] == stock_code for e in etfs)
+
+
 def search_stocks(keyword: str) -> list[dict]:
-    """搜索股票，返回匹配的股票列表"""
+    """搜索股票、指数和 ETF，返回匹配的列表"""
     try:
         stocks = _load_stock_list()
+        indices = _load_index_list()
+        etfs = _load_etf_list()
+        all_items = stocks + indices + etfs
         results = [
-            s for s in stocks
+            s for s in all_items
             if keyword in s["stock_code"] or keyword in s["stock_name"]
         ]
         return results[:20]
@@ -64,16 +120,26 @@ def search_stocks(keyword: str) -> list[dict]:
         raise RuntimeError(f"搜索股票失败: {e}")
 
 
-def _sina_symbol(stock_code: str) -> str:
-    """将纯数字股票代码转为新浪格式 (sz000001, sh600000)"""
-    if stock_code.startswith("6") or stock_code.startswith("9"):
+def _sina_symbol(stock_code: str, is_index: bool = False) -> str:
+    """将纯数字代码转为新浪格式。
+
+    个股: 6/9 开头 -> sh, 其余 -> sz
+    指数: 000/880 开头 -> sh, 399 开头 -> sz
+    ETF/基金: 5 开头 -> sh, 1 开头 -> sz
+    """
+    if is_index:
+        if stock_code.startswith(_SH_INDEX_PREFIXES):
+            return f"sh{stock_code}"
+        return f"sz{stock_code}"
+    # 上交所: 6xxxxx(个股), 5xxxxx(ETF/基金), 9xxxxx(B股)
+    if stock_code.startswith(("6", "5", "9")):
         return f"sh{stock_code}"
     return f"sz{stock_code}"
 
 
-def _get_kline_sina(stock_code: str, period: str, datalen: int = 300) -> list[dict]:
+def _get_kline_sina(stock_code: str, period: str, datalen: int = 300, *, is_index: bool = False) -> list[dict]:
     """通过新浪财经接口获取K线数据"""
-    symbol = _sina_symbol(stock_code)
+    symbol = _sina_symbol(stock_code, is_index=is_index)
     scale = _PERIOD_SCALE.get(period, 240)
     url = (
         f"https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_data=/"
@@ -109,16 +175,25 @@ def _get_kline_sina(stock_code: str, period: str, datalen: int = 300) -> list[di
 
 def _get_kline_akshare(
     stock_code: str, period: str, start_date: str, end_date: str,
+    *, code_is_index: bool = False,
 ) -> list[dict]:
-    """通过 AKShare(东方财富) 获取K线数据"""
-    df = ak.stock_zh_a_hist(
-        symbol=stock_code,
-        period=period,
-        start_date=start_date,
-        end_date=end_date,
-        adjust="qfq",
-        timeout=8,
-    )
+    """通过 AKShare(东方财富) 获取K线数据，支持个股和指数"""
+    if code_is_index:
+        df = ak.index_zh_a_hist(
+            symbol=stock_code,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    else:
+        df = ak.stock_zh_a_hist(
+            symbol=stock_code,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            adjust="qfq",
+            timeout=8,
+        )
     records = []
     for _, row in df.iterrows():
         records.append({
@@ -248,16 +323,17 @@ def _fetch_remote_kline(stock_code: str, period: str) -> list[dict]:
     logger = logging.getLogger(__name__)
     start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
     end_date = datetime.now().strftime("%Y%m%d")
+    code_is_index = is_index_code(stock_code)
     try:
         # AKShare 单次尝试，不重试，快速降级
-        data = _get_kline_akshare(stock_code, period, start_date, end_date)
+        data = _get_kline_akshare(stock_code, period, start_date, end_date, code_is_index=code_is_index)
         logger.info("K线数据来源: AKShare, records=%d", len(data))
         return data
     except Exception as e:
         logger.warning("AKShare获取失败: %s, 降级到新浪", e)
 
     try:
-        data = _retry_call(lambda: _get_kline_sina(stock_code, period))
+        data = _retry_call(lambda: _get_kline_sina(stock_code, period, is_index=code_is_index))
         logger.info("K线数据来源: 新浪, records=%d", len(data))
         return data
     except Exception as e:

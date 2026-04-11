@@ -10,6 +10,7 @@ export interface FocusStock {
 export interface StockSearchResult {
   stock_code: string;
   stock_name: string;
+  type?: 'stock' | 'index' | 'etf';
 }
 
 export interface KlineData {

@@ -23,20 +23,36 @@ class SentimentAgent(BaseAgent):
             "events_data": (fetch_hithink_events, (stock_name,)),
         })
 
-        # 使用数据源缓存服务获取资讯和公告（支持独立缓存）
+        # 使用数据源缓存服务获取资讯、公告、研报、公司基本面、股东信息
         if db:
             from app.services.data_source_service import get_data_source
             hithink_news, _, _ = get_data_source(db, stock_code, stock_name, "hithink_news")
             announcements, _, _ = get_data_source(db, stock_code, stock_name, "announcements")
+            reports, _, _ = get_data_source(db, stock_code, stock_name, "reports")
+            basicinfo, _, _ = get_data_source(db, stock_code, stock_name, "basicinfo")
+            business, _, _ = get_data_source(db, stock_code, stock_name, "business")
+            shareholders, _, _ = get_data_source(db, stock_code, stock_name, "shareholders")
         else:
-            from app.services.data_fetcher import fetch_hithink_news, fetch_hithink_announcements
+            from app.services.data_fetcher import (
+                fetch_hithink_news, fetch_hithink_announcements,
+                fetch_hithink_reports, fetch_hithink_basicinfo,
+                fetch_hithink_business_data, fetch_hithink_shareholders,
+            )
             hithink_news = fetch_hithink_news(stock_name)
             announcements = fetch_hithink_announcements(stock_name)
+            reports = fetch_hithink_reports(stock_name)
+            basicinfo = fetch_hithink_basicinfo(stock_name)
+            business = fetch_hithink_business_data(stock_name)
+            shareholders = fetch_hithink_shareholders(stock_name)
 
         return {
             **base_results,
             "hithink_news": hithink_news,
             "announcements": announcements,
+            "reports": reports,
+            "basicinfo": basicinfo,
+            "business": business,
+            "shareholders": shareholders,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -47,6 +63,10 @@ class SentimentAgent(BaseAgent):
             events_data=raw_data.get("events_data", {}),
             hithink_news=raw_data.get("hithink_news", {}),
             announcements=raw_data.get("announcements", {}),
+            reports=raw_data.get("reports", {}),
+            basicinfo=raw_data.get("basicinfo", {}),
+            business=raw_data.get("business", {}),
+            shareholders=raw_data.get("shareholders", {}),
         )
 
     def parse_response(self, llm_output: dict, *, raw_data: dict, **kwargs: Any) -> dict:
