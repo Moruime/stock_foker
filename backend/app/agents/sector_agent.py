@@ -13,12 +13,12 @@ class SectorAgent(BaseAgent):
     agent_name = "sector"
 
     def fetch_data(self, **kwargs: Any) -> dict:
-        stock_code: str = kwargs["stock_code"]
-        industry = fetch_industry_board(stock_code)
-        concepts = fetch_concept_boards(stock_code)
+        stock_name: str = kwargs.get("stock_name", "")
+        industry = fetch_industry_board(stock_name)
+        concepts = fetch_concept_boards()
         return {
             "industry": industry or {},
-            "concepts": concepts or [],
+            "concepts": concepts or {},
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -48,17 +48,12 @@ class SectorAgent(BaseAgent):
         }
 
     def fallback(self, *, raw_data: dict, **kwargs: Any) -> dict:
-        industry = raw_data.get("industry", {})
-        concepts = raw_data.get("concepts", [])
         return {
-            "sector_name": industry.get("board_name", "未知"),
+            "sector_name": "未知",
             "sector_trend": "震荡",
             "relative_strength": 0,
             "sector_rotation_signal": "稳定",
-            "related_concepts": [
-                {"name": c.get("board_name", ""), "activity": "一般"}
-                for c in concepts[:5]
-            ],
-            "top_peers": industry.get("top_stocks", []),
-            "analysis": "AI 分析不可用，展示原始板块数据。",
+            "related_concepts": [],
+            "top_peers": [],
+            "analysis": "AI 分析不可用，无法获取板块数据。",
         }

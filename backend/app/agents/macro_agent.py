@@ -6,7 +6,7 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import macro_prompt
-from app.services.data_fetcher import fetch_index_data, fetch_north_flow, fetch_market_overview
+from app.services.data_fetcher import fetch_index_data, fetch_north_flow, fetch_market_overview, fetch_hithink_macro_indicators
 
 
 class MacroAgent(BaseAgent):
@@ -16,10 +16,12 @@ class MacroAgent(BaseAgent):
         index_data = fetch_index_data()
         north_flow = fetch_north_flow()
         market_overview = fetch_market_overview()
+        hithink_macro = fetch_hithink_macro_indicators()
         return {
             "index_data": index_data or {},
             "north_flow": north_flow or {},
             "market_overview": market_overview or {},
+            "hithink_macro": hithink_macro,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -40,29 +42,16 @@ class MacroAgent(BaseAgent):
         }
 
     def fallback(self, *, raw_data: dict, **kwargs: Any) -> dict:
-        index_data = raw_data.get("index_data", {})
-        north_flow = raw_data.get("north_flow", {})
-        market = raw_data.get("market_overview", {})
-
         indicators = []
-        if index_data.get("change_pct") is not None:
-            indicators.append({
-                "name": "上证指数涨跌",
-                "value": f"{index_data['change_pct']:.2f}%",
-                "interpretation": "近期走势",
-            })
-        if north_flow.get("net_flow") is not None:
-            indicators.append({
-                "name": "北向资金净流入",
-                "value": f"{north_flow['net_flow']:.2f}亿",
-                "interpretation": "外资动向",
-            })
-        if market.get("up_count") is not None:
-            indicators.append({
-                "name": "涨跌家数",
-                "value": f"涨{market['up_count']}/跌{market['down_count']}",
-                "interpretation": "市场广度",
-            })
+        # 从问财返回的原始数据中提取概要信息
+        for key, label in [("index_data", "上证指数"), ("north_flow", "北向资金"), ("market_overview", "市场概况")]:
+            data = raw_data.get(key, {})
+            if data and data.get("datas"):
+                indicators.append({
+                    "name": label,
+                    "value": "已获取",
+                    "interpretation": "详见原始数据",
+                })
 
         return {
             "market_phase": "震荡市",

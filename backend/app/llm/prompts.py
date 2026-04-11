@@ -12,17 +12,26 @@ import json
 def sentiment_prompt(
     stock_code: str,
     stock_name: str,
-    news_list: list[dict],
+    news_data: dict,
+    events_data: dict | None = None,
 ) -> list[dict[str, str]]:
-    news_text = "\n".join(
-        f"- [{n.get('date', '')}] {n.get('title', '')}  来源: {n.get('source', '')}"
-        for n in news_list[:20]
-    )
+    news_section = ""
+    if news_data and (news_data.get("datas") or news_data.get("chunks_info")):
+        news_section = f"""
+近期新闻与公告（同花顺问财）:
+{json.dumps(news_data, ensure_ascii=False, indent=2)}
+"""
+    events_section = ""
+    if events_data and (events_data.get("datas") or events_data.get("chunks_info")):
+        events_section = f"""
+近期重要事件（同花顺问财）:
+{json.dumps(events_data, ensure_ascii=False, indent=2)}
+"""
     return [
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股消息面分析师。根据提供的个股新闻列表，分析消息面整体多空情绪，"
+                "你是一名专业的 A 股消息面分析师。根据提供的个股新闻列表和重要事件，分析消息面整体多空情绪，"
                 "区分有效信息和噪音，给出结构化的 JSON 分析结果。"
             ),
         },
@@ -31,10 +40,7 @@ def sentiment_prompt(
             "content": f"""请分析以下股票的近期消息面情绪：
 
 股票: {stock_name}({stock_code})
-
-近期新闻:
-{news_text}
-
+{news_section}{events_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "overall_sentiment": <-1.0到1.0的浮点数，负为利空，正为利好>,
@@ -108,11 +114,26 @@ def macro_prompt(
     stock_name: str | None = None,
 ) -> list[dict[str, str]]:
     stock_info = f"\n关联个股: {stock_name}({stock_code})" if stock_code else ""
+    # 所有数据均来自同花顺问财 API
+    hithink_macro = macro_data.get("hithink_macro", {})
+    market_data = {k: v for k, v in macro_data.items() if k != "hithink_macro"}
+    market_section = ""
+    if any(v for v in market_data.values() if isinstance(v, dict) and v.get("datas")):
+        market_section = f"""
+市场行情数据（同花顺问财）:
+{json.dumps(market_data, ensure_ascii=False, indent=2)}
+"""
+    hithink_section = ""
+    if hithink_macro:
+        hithink_section = f"""
+宏观经济指标（同花顺问财）:
+{json.dumps(hithink_macro, ensure_ascii=False, indent=2)}
+"""
     return [
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股宏观环境分析师。根据大盘指数、资金流向和市场数据，"
+                "你是一名专业的 A 股宏观环境分析师。根据大盘指数、资金流向和宏观经济指标（CPI/PPI/PMI/LPR/M2等），"
                 "判断当前市场阶段和风险等级，给出结构化的 JSON 分析结果。"
             ),
         },
@@ -120,10 +141,7 @@ def macro_prompt(
             "role": "user",
             "content": f"""请分析当前 A 股宏观环境：
 {stock_info}
-
-宏观数据:
-{json.dumps(macro_data, ensure_ascii=False, indent=2)}
-
+{market_section}{hithink_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "market_phase": "<牛市|熊市|震荡市>",
@@ -152,13 +170,27 @@ def enhanced_advice_prompt(
     macro_result: dict,
     profile: dict,
     position: dict | None,
+    fundamental_data: dict | None = None,
+    insresearch_data: dict | None = None,
 ) -> list[dict[str, str]]:
     position_info = json.dumps(position, ensure_ascii=False) if position else "无持仓"
+    fundamental_section = ""
+    if fundamental_data and (fundamental_data.get("datas") or fundamental_data.get("chunks_info")):
+        fundamental_section = f"""
+七、基本面财务数据（同花顺问财）:
+{json.dumps(fundamental_data, ensure_ascii=False, indent=2)}
+"""
+    insresearch_section = ""
+    if insresearch_data and (insresearch_data.get("datas") or insresearch_data.get("chunks_info")):
+        insresearch_section = f"""
+八、机构评级与研究（同花顺问财）:
+{json.dumps(insresearch_data, ensure_ascii=False, indent=2)}
+"""
     return [
         {
             "role": "system",
             "content": (
-                "你是一名资深 A 股投资顾问。你需要综合技术面、消息面、板块联动、宏观环境四个维度，"
+                "你是一名资深 A 股投资顾问。你需要综合技术面、消息面、板块联动、宏观环境、基本面五个维度，"
                 "结合用户的个人交易风格和当前持仓，给出个性化的投资建议。\n"
                 "要求：\n"
                 "1. 必须综合所有维度进行判断，不能只看单一维度\n"
@@ -190,7 +222,7 @@ def enhanced_advice_prompt(
 
 六、当前持仓:
 {position_info}
-
+{fundamental_section}{insresearch_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "signal": "<buy|sell|hold>",
@@ -200,14 +232,16 @@ def enhanced_advice_prompt(
     "<推理步骤2：消息面维度判断>",
     "<推理步骤3：板块联动维度判断>",
     "<推理步骤4：宏观环境维度判断>",
-    "<推理步骤5：结合用户画像的综合权衡>",
-    "<推理步骤6：最终结论>"
+    "<推理步骤5：基本面/机构评级维度判断>",
+    "<推理步骤6：结合用户画像的综合权衡>",
+    "<推理步骤7：最终结论>"
   ],
   "dimension_scores": {{
     "technical": <-1到1>,
     "sentiment": <-1到1>,
     "sector": <-1到1>,
-    "macro": <-1到1>
+    "macro": <-1到1>,
+    "fundamental": <-1到1>
   }},
   "risk_warnings": ["<风险提示1>", "<风险提示2>"],
   "position_advice": "<建仓|加仓|减仓|清仓|观望|null>",

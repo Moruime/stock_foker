@@ -210,6 +210,7 @@ function EnhancedAdviceDetail({ data }: { data: Record<string, unknown> }) {
     sentiment: '消息面',
     sector: '板块',
     macro: '宏观',
+    fundamental: '基本面',
   };
 
   return (

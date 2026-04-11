@@ -19,6 +19,9 @@ class LLMClient:
 
     def __init__(self, config: LLMConfig | None = None) -> None:
         self._cfg = config or get_llm_config()
+        # trust_env=False：不读取 macOS 系统代理，直连 dashscope/OpenAI 等 LLM 接口
+        # 避免系统代理故障导致 LLM 调用超时
+        self._http = httpx.Client(trust_env=False, timeout=self._cfg.timeout)
 
     # ------------------------------------------------------------------
     # 公开方法
@@ -54,13 +57,12 @@ class LLMClient:
         }
 
         last_err: Exception | None = None
-        for attempt in range(1):
+        for attempt in range(3):
             try:
-                resp = httpx.post(
+                resp = self._http.post(
                     url,
                     json=body,
                     headers=headers,
-                    timeout=self._cfg.timeout,
                 )
                 resp.raise_for_status()
                 data = resp.json()

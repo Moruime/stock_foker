@@ -85,9 +85,10 @@ def _get_stale_cached(db: Session, agent_name: str, stock_code: str) -> dict | N
 
 
 def _save_cache(db: Session, result: dict, stock_code: str) -> None:
-    """写入或更新缓存。"""
+    """写入或更新缓存。created_at 使用本地时间（避免 SQLite CURRENT_TIMESTAMP 的 UTC 问题）。"""
     agent_name = result["agent_name"]
     cache_key = _cache_key_today()
+    now = datetime.now()
     existing = db.query(AgentResultCache).filter(
         AgentResultCache.agent_name == agent_name,
         AgentResultCache.stock_code == stock_code,
@@ -98,6 +99,7 @@ def _save_cache(db: Session, result: dict, stock_code: str) -> None:
         existing.llm_used = int(result["llm_used"])
         existing.data = json.dumps(result["data"], ensure_ascii=False)
         existing.error_message = result.get("error_message")
+        existing.created_at = now
     else:
         row = AgentResultCache(
             agent_name=agent_name,
@@ -107,6 +109,7 @@ def _save_cache(db: Session, result: dict, stock_code: str) -> None:
             llm_used=int(result["llm_used"]),
             data=json.dumps(result["data"], ensure_ascii=False),
             error_message=result.get("error_message"),
+            created_at=now,
         )
         db.add(row)
     db.commit()

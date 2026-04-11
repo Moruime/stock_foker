@@ -1,3 +1,32 @@
+import logging
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ------------------------------------------------------------------
+# 统一日志格式：为所有 logger（含 uvicorn）加上时间戳
+# ------------------------------------------------------------------
+_LOG_FMT = "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s"
+_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format=_LOG_FMT,
+    datefmt=_LOG_DATEFMT,
+    force=True,
+)
+
+# uvicorn 自建 handler 不走 root logger，在 startup 事件中覆盖（import 时 handler 尚未创建）
+_formatter = logging.Formatter(_LOG_FMT, datefmt=_LOG_DATEFMT)
+
+
+def _unify_uvicorn_log_format() -> None:
+    for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        uv_logger = logging.getLogger(name)
+        for h in uv_logger.handlers:
+            h.setFormatter(_formatter)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,6 +53,7 @@ app.include_router(snapshot_router)
 @app.on_event("startup")
 def on_startup():
     init_db()
+    _unify_uvicorn_log_format()
 
 
 @app.get("/")

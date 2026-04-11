@@ -6,22 +6,27 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import sentiment_prompt
-from app.services.data_fetcher import fetch_stock_news
+from app.services.data_fetcher import fetch_stock_news, fetch_hithink_events
 
 
 class SentimentAgent(BaseAgent):
     agent_name = "sentiment"
 
     def fetch_data(self, **kwargs: Any) -> dict:
-        stock_code: str = kwargs["stock_code"]
-        news_list = fetch_stock_news(stock_code)
-        return {"news_list": news_list or []}
+        stock_name: str = kwargs.get("stock_name", "")
+        news_data = fetch_stock_news(stock_name)
+        events_data = fetch_hithink_events(stock_name)
+        return {
+            "news_data": news_data,
+            "events_data": events_data,
+        }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
         return sentiment_prompt(
             stock_code=kwargs["stock_code"],
             stock_name=kwargs["stock_name"],
-            news_list=raw_data["news_list"],
+            news_data=raw_data["news_data"],
+            events_data=raw_data.get("events_data", {}),
         )
 
     def parse_response(self, llm_output: dict, *, raw_data: dict, **kwargs: Any) -> dict:
@@ -31,25 +36,15 @@ class SentimentAgent(BaseAgent):
             "key_news": llm_output.get("key_news", []),
             "noise_ratio": llm_output.get("noise_ratio", 0),
             "analysis": llm_output.get("analysis", ""),
-            "raw_news_count": len(raw_data["news_list"]),
+            "raw_news_count": len(raw_data["news_data"].get("datas", [])) if isinstance(raw_data["news_data"], dict) else 0,
         }
 
     def fallback(self, *, raw_data: dict, **kwargs: Any) -> dict:
-        news = raw_data["news_list"]
         return {
             "overall_sentiment": 0,
             "sentiment_label": "中性",
-            "key_news": [
-                {
-                    "title": n.get("title", ""),
-                    "date": n.get("date", ""),
-                    "sentiment": "中性",
-                    "impact_level": "中",
-                    "summary": n.get("title", ""),
-                }
-                for n in news[:10]
-            ],
+            "key_news": [],
             "noise_ratio": 0,
-            "analysis": "AI 分析不可用，展示原始新闻列表。",
-            "raw_news_count": len(news),
+            "analysis": "AI 分析不可用，无法获取消息面数据。",
+            "raw_news_count": 0,
         }

@@ -567,13 +567,19 @@ export default function AnalysisPage() {
         {!aiLoading && aiAnalysis && (() => {
           const ea = aiAnalysis.enhanced_advice.data;
           const ds = (ea.dimension_scores as Record<string, number>) || {};
+          // 将 LLM 输出的 -1~1 归一化到 0~100 供雷达图显示
+          // -1 → 0（最差）、0 → 50（中性）、1 → 100（最佳）
+          const toRadar = (v: number) => Math.round((Math.max(-1, Math.min(1, v)) + 1) * 50);
           const radarData = [
-            ds.technical ?? 0,
-            ds.sentiment ?? 0,
-            ds.sector ?? 0,
-            ds.macro ?? 0,
+            toRadar(ds.technical ?? 0),
+            toRadar(ds.sentiment ?? 0),
+            toRadar(ds.sector ?? 0),
+            toRadar(ds.macro ?? 0),
+            toRadar(ds.fundamental ?? 0),
           ];
-          const hasRadarData = radarData.some((v) => v !== 0);
+          // 带 LLM 分析结果时才显示图表（不能全是 50 中性占位）
+          const hasRadarData = (aiAnalysis.enhanced_advice.llm_used === true) &&
+            radarData.some((v) => v !== 50);
 
           const aiSignal = (ea.signal as string) || 'hold';
           const aiConfidence = (ea.confidence as number) || 0;
@@ -593,6 +599,7 @@ export default function AnalysisPage() {
                 { name: '消息面', max: 100 },
                 { name: '板块', max: 100 },
                 { name: '宏观', max: 100 },
+                { name: '基本面', max: 100 },
               ],
               shape: 'polygon' as const,
               axisName: { color: COLORS.textSecondary },
@@ -604,7 +611,7 @@ export default function AnalysisPage() {
               type: 'radar',
               data: [{
                 value: radarData,
-                name: '四维评分',
+                name: '五维评分',
                 areaStyle: { color: 'rgba(77,171,247,0.25)' },
                 lineStyle: { color: COLORS.primary },
                 itemStyle: { color: COLORS.primary },

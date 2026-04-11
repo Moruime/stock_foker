@@ -15,9 +15,11 @@ class EnhancedAdviceAgent(BaseAgent):
         """从 kwargs 获取上游数据（由 router 层预先准备）。"""
         from app.services.advice_service import generate_advice
         from app.services.profile_service import generate_profile
+        from app.services.data_fetcher import fetch_hithink_finance_data, fetch_hithink_insresearch_data
 
         db = kwargs.get("db")
         stock_code = kwargs["stock_code"]
+        stock_name = kwargs.get("stock_name", "")
         kline = kwargs.get("kline", [])
         indicators = kwargs.get("indicators", {})
 
@@ -40,10 +42,16 @@ class EnhancedAdviceAgent(BaseAgent):
                     "stop_loss_price": pos.stop_loss_price,
                 }
 
+        # 基本面数据（同花顺）
+        fundamental_data = fetch_hithink_finance_data(stock_name)
+        insresearch_data = fetch_hithink_insresearch_data(stock_name)
+
         return {
             "technical_advice": technical_advice,
             "profile": profile,
             "position": position,
+            "fundamental_data": fundamental_data,
+            "insresearch_data": insresearch_data,
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
@@ -56,16 +64,22 @@ class EnhancedAdviceAgent(BaseAgent):
             macro_result=kwargs.get("macro_result", {}),
             profile=raw_data["profile"],
             position=raw_data["position"],
+            fundamental_data=raw_data.get("fundamental_data", {}),
+            insresearch_data=raw_data.get("insresearch_data", {}),
         )
 
     def parse_response(self, llm_output: dict, *, raw_data: dict, **kwargs: Any) -> dict:
         technical = raw_data["technical_advice"]
+        dim_scores = llm_output.get("dimension_scores", {})
+        # 确保始终包含 fundamental 维度
+        if "fundamental" not in dim_scores:
+            dim_scores["fundamental"] = 0
         return {
             "signal": llm_output.get("signal", technical.get("signal", "hold")),
             "confidence": llm_output.get("confidence", technical.get("confidence", 0)),
             "reasoning": llm_output.get("reasoning", []),
             "indicators_summary": technical.get("indicators_summary", {}),
-            "dimension_scores": llm_output.get("dimension_scores", {}),
+            "dimension_scores": dim_scores,
             "risk_warnings": llm_output.get("risk_warnings", []),
             "position_advice": llm_output.get("position_advice"),
             "summary": llm_output.get("summary", ""),
@@ -83,6 +97,7 @@ class EnhancedAdviceAgent(BaseAgent):
                 "sentiment": 0,
                 "sector": 0,
                 "macro": 0,
+                "fundamental": 0,
             },
             "risk_warnings": [],
             "position_advice": None,
