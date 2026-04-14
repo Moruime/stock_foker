@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from io import BytesIO
+
+import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.models.models import FocusStock, TradeRecord, StockPosition, RecordMode
+from app.models.models import FocusStock, TradeRecord, StockPosition, RecordMode, TradeType
 from app.models.schemas import (
     FocusStockCreate,
     FocusStockResponse,
@@ -254,6 +258,85 @@ def create_trade(data: TradeRecordCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.post("/trades/import")
+async def import_trades(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """批量导入同花顺导出的交易记录（GBK 编码 TSV / .xls 文件）"""
+    content = await file.read()
+
+    # 尝试 GBK TSV 解析（同花顺导出的 .xls 实际是 TSV 文本）
+    try:
+        df = pd.read_csv(BytesIO(content), sep="\t", encoding="gbk")
+    except Exception:
+        try:
+            df = pd.read_csv(BytesIO(content), sep="\t", encoding="utf-8")
+        except Exception:
+            raise HTTPException(status_code=400, detail="文件解析失败，仅支持同花顺导出的 xls/tsv 文件")
+
+    # 验证必需列
+    required_cols = {"成交日期", "证券代码", "证券名称", "操作", "成交均价", "成交数量"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise HTTPException(status_code=400, detail=f"缺少必需列: {', '.join(missing)}")
+
+    success_count = 0
+    skip_count = 0
+    errors: list[str] = []
+
+    for idx, row in df.iterrows():
+        line = idx + 2  # Excel 行号（含表头）
+        try:
+            # 解析操作类型
+            op = str(row["操作"]).strip()
+            if "买入" in op:
+                trade_type = TradeType.BUY
+            elif "卖出" in op:
+                trade_type = TradeType.SELL
+            else:
+                skip_count += 1
+                continue  # 跳过非买卖操作（如申购、配股等）
+
+            # 解析日期：支持 20260402 整数 或 2026-04-02 字符串
+            raw_date = row["成交日期"]
+            if isinstance(raw_date, (int, float)):
+                date_str = str(int(raw_date))
+                traded_at = datetime.strptime(date_str, "%Y%m%d")
+            else:
+                traded_at = datetime.strptime(str(raw_date).strip(), "%Y-%m-%d")
+
+            # 股票代码补零
+            code_raw = str(int(row["证券代码"])).zfill(6)
+            stock_name = str(row["证券名称"]).strip()
+            price = float(row["成交均价"])
+            quantity = abs(int(row["成交数量"]))  # 卖出数量为负，取绝对值
+
+            if quantity == 0 or price <= 0:
+                skip_count += 1
+                continue
+
+            record = TradeRecord(
+                stock_code=code_raw,
+                stock_name=stock_name,
+                trade_type=trade_type,
+                price=price,
+                quantity=quantity,
+                traded_at=traded_at,
+                record_mode=RecordMode.BACKFILL,
+            )
+            db.add(record)
+            success_count += 1
+
+        except Exception as e:
+            errors.append(f"第{line}行: {str(e)}")
+
+    db.commit()
+    return {
+        "success": success_count,
+        "skipped": skip_count,
+        "errors": errors,
+        "total": len(df),
+    }
 
 
 @router.put("/trades/{trade_id}", response_model=TradeRecordResponse)

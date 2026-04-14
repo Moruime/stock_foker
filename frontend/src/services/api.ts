@@ -67,6 +67,23 @@ export const updateTradeRecord = (
 export const deleteTradeRecord = (id: number) =>
   api.delete(`/trades/${id}`).then((r) => r.data);
 
+export interface ImportResult {
+  success: number;
+  skipped: number;
+  errors: string[];
+  total: number;
+}
+
+export const importTradeRecords = (file: File): Promise<ImportResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api
+    .post<ImportResult>('/trades/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    .then((r) => r.data);
+};
+
 // --- 画像 ---
 export const getTradingProfile = (stockCode?: string) =>
   api

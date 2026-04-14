@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   Table,
@@ -14,16 +14,16 @@ import {
   Space,
   Empty,
   message,
-  Popconfirm,
   Typography,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   getTradeRecords,
   createTradeRecord,
   updateTradeRecord,
   deleteTradeRecord,
+  importTradeRecords,
 } from '../services/api';
 import type { FocusStock, TradeRecord } from '../types';
 import PositionCard from '../components/PositionCard';
@@ -37,6 +37,9 @@ export default function TradesPage() {
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
   const [positionKey, setPositionKey] = useState(0);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [modal, modalCtx] = Modal.useModal();
 
   const loadRecords = () => {
     setLoading(true);
@@ -104,10 +107,66 @@ export default function TradesPage() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    await deleteTradeRecord(id);
-    message.success('已删除');
-    loadRecords();
+  const handleDelete = (record: TradeRecord) => {
+    modal.confirm({
+      title: '确认删除交易记录？',
+      content: (
+        <div>
+          <p style={{ marginBottom: 4 }}>
+            <strong>{record.stock_name}({record.stock_code})</strong>
+          </p>
+          <p style={{ marginBottom: 4 }}>
+            {record.trade_type === 'buy' ? '买入' : '卖出'} {record.quantity} 股 × {record.price} 元
+          </p>
+          <p style={{ marginBottom: 0, color: '#999' }}>
+            {dayjs(record.traded_at).format('YYYY-MM-DD')}
+            {record.record_mode === 'realtime' ? '（实时交易，删除后将反向调整持仓）' : '（历史补录）'}
+          </p>
+        </div>
+      ),
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        await deleteTradeRecord(record.id);
+        message.success('已删除');
+        loadRecords();
+        if (record.record_mode === 'realtime') {
+          setPositionKey((k) => k + 1);
+        }
+      },
+    });
+  };
+
+  const handleImport = async (file: File) => {
+    setImporting(true);
+    try {
+      const result = await importTradeRecords(file);
+      const parts = [`成功导入 ${result.success} 条`];
+      if (result.skipped > 0) parts.push(`跳过 ${result.skipped} 条`);
+      if (result.errors.length > 0) parts.push(`失败 ${result.errors.length} 条`);
+      message.success(parts.join('，'));
+      if (result.errors.length > 0) {
+        modal.warning({
+          title: '部分记录导入失败',
+          content: (
+            <div style={{ maxHeight: 300, overflow: 'auto' }}>
+              {result.errors.map((e, i) => (
+                <div key={i}>{e}</div>
+              ))}
+            </div>
+          ),
+        });
+      }
+      loadRecords();
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      message.error(detail || '导入失败，请检查文件格式');
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const columns = [
@@ -192,9 +251,13 @@ export default function TradesPage() {
           >
             编辑
           </Button>
-          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.id)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record)}
+          />
         </Space>
       ),
     },
@@ -202,11 +265,31 @@ export default function TradesPage() {
 
   return (
     <div>
+      {modalCtx}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <Typography.Title level={5} style={{ margin: 0 }}>交易操作记录</Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          新增记录
-        </Button>
+        <Space>
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".xls,.xlsx,.csv,.tsv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleImport(f);
+            }}
+          />
+          <Button
+            icon={<UploadOutlined />}
+            loading={importing}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            批量导入
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+            新增记录
+          </Button>
+        </Space>
       </div>
 
       {focus && (

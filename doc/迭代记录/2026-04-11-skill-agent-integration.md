@@ -5,8 +5,8 @@
 将 13 个同花顺 SkillHub 技能全量接入 4 大 Agent，
 实现 AI 分析从「纯大盘行情」升级至
 「宏观指标 + 基本面 + 结构化事件 + 行业估值」
-多维分析体系；同时完成第一期架构审查，
-修复 P0/P1/P2 共 15 项隐患。
+多维分析体系；完成第一期架构审查 P0/P1/P2 共 15 项修复；
+新增同花顺交易记录批量导入功能与删除操作安全增强。
 
 ## 2 新增功能
 
@@ -133,3 +133,33 @@
 | `frontend/src/components/SnapshotPanel.tsx` | fundamental 标签 |
 | `frontend/src/contexts/AgentCacheContext.tsx` | 缓存淘汰 |
 | `frontend/src/hooks/useDataSource.ts` | 缓存淘汰 |
+
+## 5 交易记录批量导入
+
+| 功能 | 说明 |
+| --- | --- |
+| `POST /api/trades/import` | 文件上传端点，解析同花顺导出文件 |
+| GBK TSV 解析 | 自动识别同花顺 .xls（实为 GBK TSV） |
+| 字段映射 | 成交日期/证券代码/名称/操作/均价/数量 |
+| 导入模式 | 全部以 backfill 模式写入，不影响持仓 |
+| 前端批量导入按钮 | TradesPage 新增上传入口与结果提示 |
+
+## 6 操作安全增强
+
+| 功能 | 说明 |
+| --- | --- |
+| 删除双重确认 | Modal.confirm 替代 Popconfirm |
+| 确认弹窗详情 | 展示股票/方向/数量/价格/日期 |
+| 实时交易提示 | 提醒「删除后将反向调整持仓」 |
+| useModal hook | 修复 Ant Design 5 静态方法不弹出问题 |
+
+## 7 关键文件变更（补充）
+
+### 7.1 修改文件
+
+| 文件 | 变更 |
+| --- | --- |
+| `backend/app/routers/stock_router.py` | 新增 /trades/import 端点 |
+| `backend/requirements.txt` | 新增 python-multipart |
+| `frontend/src/services/api.ts` | 新增 importTradeRecords |
+| `frontend/src/pages/TradesPage.tsx` | 批量导入 + 删除确认重构 |
