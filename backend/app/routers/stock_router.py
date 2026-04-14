@@ -282,6 +282,7 @@ async def import_trades(file: UploadFile = File(...), db: Session = Depends(get_
 
     success_count = 0
     skip_count = 0
+    dup_count = 0
     errors: list[str] = []
 
     for idx, row in df.iterrows():
@@ -315,6 +316,18 @@ async def import_trades(file: UploadFile = File(...), db: Session = Depends(get_
                 skip_count += 1
                 continue
 
+            # 去重：按日期+代码+价格+数量+方向判断
+            exists = db.query(TradeRecord).filter(
+                TradeRecord.stock_code == code_raw,
+                TradeRecord.trade_type == trade_type,
+                TradeRecord.price == price,
+                TradeRecord.quantity == quantity,
+                TradeRecord.traded_at == traded_at,
+            ).first()
+            if exists:
+                dup_count += 1
+                continue
+
             record = TradeRecord(
                 stock_code=code_raw,
                 stock_name=stock_name,
@@ -334,6 +347,7 @@ async def import_trades(file: UploadFile = File(...), db: Session = Depends(get_
     return {
         "success": success_count,
         "skipped": skip_count,
+        "duplicated": dup_count,
         "errors": errors,
         "total": len(df),
     }
@@ -389,6 +403,53 @@ def delete_trade(trade_id: int, db: Session = Depends(get_db)):
     db.delete(record)
     db.commit()
     return {"message": "删除成功"}
+
+
+@router.post("/trades/batch-delete")
+def batch_delete_trades(
+    ids: list[int],
+    db: Session = Depends(get_db),
+):
+    """批量删除交易记录，实时交易记录会反向调整持仓"""
+    if not ids:
+        raise HTTPException(status_code=400, detail="请选择要删除的记录")
+
+    records = db.query(TradeRecord).filter(TradeRecord.id.in_(ids)).all()
+    deleted = 0
+    realtime_adjusted = 0
+
+    for record in records:
+        # 实时交易模式：反向调整持仓
+        if record.record_mode == RecordMode.REALTIME:
+            position = db.query(StockPosition).filter(
+                StockPosition.stock_code == record.stock_code
+            ).first()
+            if position:
+                if record.trade_type.value == "buy":
+                    if position.quantity >= record.quantity:
+                        if position.quantity == record.quantity:
+                            db.delete(position)
+                        else:
+                            old_total = position.cost_price * position.quantity
+                            new_qty = position.quantity - record.quantity
+                            position.cost_price = (
+                                (old_total - record.price * record.quantity)
+                                / new_qty
+                            )
+                            position.quantity = new_qty
+                elif record.trade_type.value == "sell":
+                    position.quantity += record.quantity
+            realtime_adjusted += 1
+
+        db.delete(record)
+        deleted += 1
+
+    db.commit()
+    return {
+        "deleted": deleted,
+        "realtime_adjusted": realtime_adjusted,
+        "total": len(ids),
+    }
 
 
 # ==================== 炒股画像 ====================

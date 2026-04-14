@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   Table,
@@ -15,6 +15,7 @@ import {
   Empty,
   message,
   Typography,
+  Tooltip,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -23,6 +24,7 @@ import {
   createTradeRecord,
   updateTradeRecord,
   deleteTradeRecord,
+  batchDeleteTradeRecords,
   importTradeRecords,
 } from '../services/api';
 import type { FocusStock, TradeRecord } from '../types';
@@ -40,6 +42,7 @@ export default function TradesPage() {
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [modal, modalCtx] = Modal.useModal();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   const loadRecords = () => {
     setLoading(true);
@@ -143,6 +146,7 @@ export default function TradesPage() {
     try {
       const result = await importTradeRecords(file);
       const parts = [`成功导入 ${result.success} 条`];
+      if (result.duplicated > 0) parts.push(`跳过重复 ${result.duplicated} 条`);
       if (result.skipped > 0) parts.push(`跳过 ${result.skipped} 条`);
       if (result.errors.length > 0) parts.push(`失败 ${result.errors.length} 条`);
       message.success(parts.join('，'));
@@ -167,6 +171,43 @@ export default function TradesPage() {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedRowKeys.length === 0) return;
+    const selected = records.filter((r) => selectedRowKeys.includes(r.id));
+    const realtimeCount = selected.filter((r) => r.record_mode === 'realtime').length;
+    const backfillCount = selected.length - realtimeCount;
+
+    modal.confirm({
+      title: `确认批量删除 ${selected.length} 条记录？`,
+      content: (
+        <div>
+          {backfillCount > 0 && <p>历史补录：{backfillCount} 条</p>}
+          {realtimeCount > 0 && (
+            <p style={{ color: '#faad14' }}>
+              实时交易：{realtimeCount} 条（删除后将反向调整持仓）
+            </p>
+          )}
+        </div>
+      ),
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const result = await batchDeleteTradeRecords(
+          selectedRowKeys.map(Number),
+        );
+        const parts = [`已删除 ${result.deleted} 条`];
+        if (result.realtime_adjusted > 0) {
+          parts.push(`其中 ${result.realtime_adjusted} 条实时交易已调整持仓`);
+        }
+        message.success(parts.join('，'));
+        setSelectedRowKeys([]);
+        loadRecords();
+        if (realtimeCount > 0) setPositionKey((k) => k + 1);
+      },
+    });
   };
 
   const columns = [
@@ -266,9 +307,21 @@ export default function TradesPage() {
   return (
     <div>
       {modalCtx}
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <Typography.Title level={5} style={{ margin: 0 }}>交易操作记录</Typography.Title>
-        <Space>
+        <Space wrap>
+          <Tooltip title={selectedRowKeys.length === 0 ? '勾选记录后可批量删除' : undefined}>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={selectedRowKeys.length === 0}
+              onClick={handleBatchDelete}
+            >
+              {selectedRowKeys.length > 0
+                ? `删除已选 (${selectedRowKeys.length})`
+                : '批量删除'}
+            </Button>
+          </Tooltip>
           <input
             type="file"
             ref={fileInputRef}
@@ -305,7 +358,12 @@ export default function TradesPage() {
           rowKey="id"
           loading={loading}
           size="small"
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 20 }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: setSelectedRowKeys,
+          }}
         />
       )}
 

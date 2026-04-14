@@ -67,9 +67,19 @@ export const updateTradeRecord = (
 export const deleteTradeRecord = (id: number) =>
   api.delete(`/trades/${id}`).then((r) => r.data);
 
+export interface BatchDeleteResult {
+  deleted: number;
+  realtime_adjusted: number;
+  total: number;
+}
+
+export const batchDeleteTradeRecords = (ids: number[]) =>
+  api.post<BatchDeleteResult>('/trades/batch-delete', ids).then((r) => r.data);
+
 export interface ImportResult {
   success: number;
   skipped: number;
+  duplicated: number;
   errors: string[];
   total: number;
 }
