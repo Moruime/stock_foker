@@ -15,7 +15,10 @@ import type {
   AgentSnapshot,
 } from '../types';
 
-const api = axios.create({ baseURL: '/api' });
+const api = axios.create({
+  baseURL: '/api',
+  headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+});
 
 // --- 股票关注 ---
 export const getFocusStock = () =>

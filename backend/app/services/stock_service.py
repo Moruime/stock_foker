@@ -212,7 +212,7 @@ def _get_kline_akshare(
             "close": float(row["收盘"]),
             "high": float(row["最高"]),
             "low": float(row["最低"]),
-            "volume": float(row["成交量"]),
+            "volume": float(row["成交量"]) * 100,  # AKShare返回手，×100转为股
             "turnover": float(row.get("成交额", 0)),
         })
     return records

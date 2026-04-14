@@ -137,10 +137,13 @@ export default function MacroPage() {
   const macroData = (hithinkMacro.data || {}) as Record<string, Record<string, unknown>>;
   const macroItems: { label: string; value: string; numVal: number; suffix: string; time: string }[] = [];
   // 通用解析：每个子查询返回 {datas: [{指标, 指标值, 时间, ...}]}
-  const macroCategories: { key: string; label: string; isPmi?: boolean }[] = [
+  const macroCategories: { key: string; label: string; isPmi?: boolean; decimals?: number }[] = [
     { key: 'cpi', label: 'CPI同比' },
     { key: 'ppi', label: 'PPI同比' },
     { key: 'pmi', label: '制造业PMI', isPmi: true },
+    { key: 'lpr', label: 'LPR(1Y)', decimals: 2 },
+    { key: 'm2', label: 'M2同比' },
+    { key: 'shibor', label: '社融同比' },
   ];
   for (const cat of macroCategories) {
     const row = ((macroData[cat.key]?.datas as Record<string, unknown>[]) || [])[0];
@@ -150,27 +153,12 @@ export default function MacroPage() {
       if (v !== null) {
         macroItems.push({
           label: cat.label,
-          value: cat.isPmi ? v.toFixed(1) : v.toFixed(1),
+          value: v.toFixed(cat.decimals ?? 1),
           numVal: v,
           suffix: cat.isPmi ? '' : '%',
           time,
         });
       }
-    }
-  }
-  // monetary 子查询（多条记录）
-  const monRows = (macroData.monetary?.datas as Record<string, unknown>[]) || [];
-  for (const mr of monRows) {
-    const name = (mr['指标'] as string) || (mr['macro_name'] as string) || '';
-    const v = (mr['指标值'] as number) ?? null;
-    const time = (mr['时间'] as string) || '';
-    if (v === null) continue;
-    if (name.includes('LPR') && !macroItems.find(x => x.label === 'LPR')) {
-      macroItems.push({ label: 'LPR', value: v.toFixed(2), numVal: v, suffix: '%', time });
-    } else if (name.includes('M2') && !macroItems.find(x => x.label === 'M2同比')) {
-      macroItems.push({ label: 'M2同比', value: v.toFixed(1), numVal: v, suffix: '%', time });
-    } else if (name.includes('社融') && !macroItems.find(x => x.label === '社融')) {
-      macroItems.push({ label: '社融', value: (v / 1e8).toFixed(0) + '亿', numVal: v, suffix: '', time });
     }
   }
 
@@ -418,16 +406,13 @@ export default function MacroPage() {
           {hithinkMacro.loading ? (
             <Spin size="small" style={{ display: 'block', margin: '16px auto' }} />
           ) : macroItems.length > 0 ? (
-            <Row gutter={[24, 12]}>
+            <div style={{ display: 'flex', gap: 0 }}>
               {macroItems.map((item) => {
-                // 格式化时间：20260331 → 2026-03
                 const timeFmt = item.time ? `${item.time.slice(0, 4)}-${item.time.slice(4, 6)}` : '';
-                // 根据数量自适应宽度
-                const colSpan = macroItems.length <= 3 ? 8 : macroItems.length <= 4 ? 6 : 4;
                 return (
-                  <Col span={colSpan} key={item.label}>
+                  <div key={item.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <Tooltip title={timeFmt ? `数据期: ${timeFmt}` : undefined}>
-                      <div>
+                      <div style={{ textAlign: 'center' }}>
                         <Statistic
                           title={item.label}
                           value={item.value}
@@ -442,10 +427,10 @@ export default function MacroPage() {
                         {timeFmt && <Text type="secondary" style={{ fontSize: 10 }}>{timeFmt}</Text>}
                       </div>
                     </Tooltip>
-                  </Col>
+                  </div>
                 );
               })}
-            </Row>
+            </div>
           ) : (
             <Empty description="暂无宏观指标数据" />
           )}

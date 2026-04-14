@@ -61,6 +61,7 @@ function getDataZoom(instance: ECharts) {
 export default function AnalysisPage() {
   const { focus } = useOutletContext<{ focus: FocusStock | null }>();
   const [period, setPeriod] = useState('daily');
+  const [subIndicator, setSubIndicator] = useState<'macd' | 'kdj' | 'rsi'>('macd');
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -250,6 +251,54 @@ export default function AnalysisPage() {
   const dates = kline_data.map((d) => d.date);
   const ohlc = kline_data.map((d) => [d.open, d.close, d.low, d.high]);
 
+  // ---- 副图指标 series 构建 ----
+  const subSeries: Record<string, unknown>[] = [];
+  const subLegendData: string[] = [];
+
+  if (subIndicator === 'macd' && indicators.macd) {
+    subLegendData.push('DIF', 'DEA', 'MACD柱');
+    subSeries.push(
+      { name: 'DIF', type: 'line', data: indicators.macd.dif, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none', lineStyle: { width: 1, color: '#4dabf7' }, itemStyle: { color: '#4dabf7' } },
+      { name: 'DEA', type: 'line', data: indicators.macd.dea, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none', lineStyle: { width: 1, color: '#e8b339' }, itemStyle: { color: '#e8b339' } },
+      {
+        name: 'MACD柱', type: 'bar', data: indicators.macd.histogram, xAxisIndex: 2, yAxisIndex: 2,
+        itemStyle: { color: (p: { value: number }) => p.value >= 0 ? COLORS.stockUp : COLORS.stockDown },
+      },
+    );
+  } else if (subIndicator === 'kdj' && indicators.kdj) {
+    subLegendData.push('K', 'D', 'J');
+    subSeries.push(
+      { name: 'K', type: 'line', data: indicators.kdj.k, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none', lineStyle: { width: 1, color: '#4dabf7' }, itemStyle: { color: '#4dabf7' } },
+      { name: 'D', type: 'line', data: indicators.kdj.d, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none', lineStyle: { width: 1, color: '#e8b339' }, itemStyle: { color: '#e8b339' } },
+      {
+        name: 'J', type: 'line', data: indicators.kdj.j, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none',
+        lineStyle: { width: 1, color: '#b388ff' }, itemStyle: { color: '#b388ff' },
+        markLine: {
+          silent: true, symbol: 'none',
+          lineStyle: { type: 'dashed', color: COLORS.textMuted, width: 1 },
+          data: [
+            { yAxis: 80, label: { formatter: '80', position: 'end', fontSize: 10, color: COLORS.textMuted } },
+            { yAxis: 20, label: { formatter: '20', position: 'end', fontSize: 10, color: COLORS.textMuted } },
+          ],
+        },
+      },
+    );
+  } else if (subIndicator === 'rsi' && indicators.rsi) {
+    subLegendData.push('RSI');
+    subSeries.push({
+      name: 'RSI', type: 'line', data: indicators.rsi, xAxisIndex: 2, yAxisIndex: 2, symbol: 'none',
+      lineStyle: { width: 1, color: '#4dabf7' }, itemStyle: { color: '#4dabf7' },
+      markLine: {
+        silent: true, symbol: 'none',
+        lineStyle: { type: 'dashed', color: COLORS.textMuted, width: 1 },
+        data: [
+          { yAxis: 70, label: { formatter: '70', position: 'end', fontSize: 10, color: COLORS.textMuted } },
+          { yAxis: 30, label: { formatter: '30', position: 'end', fontSize: 10, color: COLORS.textMuted } },
+        ],
+      },
+    });
+  }
+
   const klineOption = {
     backgroundColor: chartDarkOption.backgroundColor,
     textStyle: chartDarkOption.textStyle,
@@ -288,18 +337,36 @@ export default function AnalysisPage() {
             html += `<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>${p.seriesName}: <span style="float:right;margin-left:12px">${p.value.toFixed(2)}</span></div>`;
           }
         }
+        // 副图指标数据
+        const subNames = ['DIF', 'DEA', 'MACD柱', 'K', 'D', 'J', 'RSI'];
+        for (const p of params) {
+          if (subNames.includes(p.seriesName) && typeof p.value === 'number' && p.value != null) {
+            html += `<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>${p.seriesName}: <span style="float:right;margin-left:12px">${p.value.toFixed(2)}</span></div>`;
+          }
+        }
         html += `</div>`;
         return html;
       },
     },
-    legend: {
-      data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'],
-      top: 0,
-      ...chartDarkOption.legend,
-    },
+    legend: [
+      {
+        data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'],
+        top: 0,
+        ...chartDarkOption.legend,
+      },
+      {
+        data: subLegendData,
+        top: '73%',
+        left: '8%',
+        itemWidth: 14,
+        itemHeight: 8,
+        textStyle: { fontSize: 10, color: COLORS.textSecondary },
+      },
+    ],
     grid: [
-      { left: '8%', right: '4%', top: '10%', height: '50%' },
-      { left: '8%', right: '4%', top: '68%', height: '18%' },
+      { left: '8%', right: '4%', top: '8%', height: '42%' },
+      { left: '8%', right: '4%', top: '55%', height: '11%' },
+      { left: '8%', right: '4%', top: '76%', height: '13%' },
     ],
     xAxis: [
       {
@@ -308,17 +375,22 @@ export default function AnalysisPage() {
       },
       {
         ...chartDarkOption.axisStyles,
-        type: 'category' as const, data: dates, gridIndex: 1,
+        type: 'category' as const, data: dates, gridIndex: 1, axisLabel: { show: false },
+      },
+      {
+        ...chartDarkOption.axisStyles,
+        type: 'category' as const, data: dates, gridIndex: 2,
       },
     ],
     yAxis: [
       { type: 'value' as const, gridIndex: 0, scale: true, ...chartDarkOption.axisStyles },
-      { type: 'value' as const, gridIndex: 1, scale: true, ...chartDarkOption.axisStyles },
+      { type: 'value' as const, gridIndex: 1, min: 0, ...chartDarkOption.axisStyles },
+      { type: 'value' as const, gridIndex: 2, scale: true, ...chartDarkOption.axisStyles },
     ],
     dataZoom: [
       {
         type: 'inside',
-        xAxisIndex: [0, 1],
+        xAxisIndex: [0, 1, 2],
         start: 70,
         end: 100,
         zoomOnMouseWheel: false,
@@ -327,7 +399,7 @@ export default function AnalysisPage() {
       },
       {
         type: 'slider',
-        xAxisIndex: [0, 1],
+        xAxisIndex: [0, 1, 2],
         start: 70,
         end: 100,
         top: '92%',
@@ -413,16 +485,14 @@ export default function AnalysisPage() {
       {
         name: '成交量',
         type: 'bar',
-        data: indicators.volumes,
+        data: kline_data.map((d, i) => ({
+          value: indicators.volumes[i],
+          itemStyle: { color: d.close >= d.open ? COLORS.stockUp : COLORS.stockDown },
+        })),
         xAxisIndex: 1,
         yAxisIndex: 1,
-        itemStyle: {
-          color: (params: { dataIndex: number }) => {
-            const idx = params.dataIndex;
-            return kline_data[idx]?.close >= kline_data[idx]?.open ? COLORS.stockUp : COLORS.stockDown;
-          },
-        },
       },
+      ...subSeries,
     ],
   };
 
@@ -442,12 +512,28 @@ export default function AnalysisPage() {
       />
 
       <Card title="K线走势与均线" size="small" style={{ marginBottom: 16 }}>
-        <div ref={wrapperRef} style={{ userSelect: 'none' }}>
-          <ReactECharts
-            option={klineOption}
-            style={{ height: 500 }}
-            onChartReady={onChartReady}
-          />
+        <div style={{ position: 'relative' }}>
+          <div ref={wrapperRef} style={{ userSelect: 'none' }}>
+            <ReactECharts
+              key={`chart_${focus.stock_code}_${period}_${kline_data.length}`}
+              option={klineOption}
+              notMerge={true}
+              style={{ height: 620 }}
+              onChartReady={onChartReady}
+            />
+          </div>
+          <div style={{ position: 'absolute', top: '69%', right: 16, zIndex: 10 }}>
+            <Segmented
+              size="small"
+              options={[
+                { value: 'macd', label: 'MACD' },
+                { value: 'kdj', label: 'KDJ' },
+                { value: 'rsi', label: 'RSI' },
+              ]}
+              value={subIndicator}
+              onChange={(v) => setSubIndicator(v as 'macd' | 'kdj' | 'rsi')}
+            />
+          </div>
         </div>
       </Card>
 

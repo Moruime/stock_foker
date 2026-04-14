@@ -134,7 +134,9 @@ def fetch_hithink_macro_indicators() -> dict:
         ("cpi", "中国CPI当月同比最新值"),
         ("ppi", "最新月度PPI当月同比"),
         ("pmi", "最近一期制造业PMI"),
-        ("monetary", "最新LPR利率 M2同比增速 社融数据"),
+        ("lpr", "最新1年期LPR利率"),
+        ("m2", "最新M2同比增速"),
+        ("shibor", "最新社融规模存量同比"),
     ]
     results = {}
     for key, q in queries:
