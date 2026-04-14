@@ -30,7 +30,7 @@ def sentiment_prompt(
     events_section = ""
     if events_data and (events_data.get("datas") or events_data.get("chunks_info")):
         events_section = f"""
-二、近期重要事件（同花顺问财）:
+二、业绩预告与重要事件（同花顺问财，含预告类型、预计净利润、变动原因）:
 {json.dumps(events_data, ensure_ascii=False, indent=2)}
 """
     hithink_news_section = ""
@@ -118,6 +118,7 @@ def sector_prompt(
     industry_valuation = sector_data.pop("industry_valuation", {})
     market_data = sector_data.pop("market_data", {})
     industry_finance = sector_data.pop("industry_finance", {})
+    concepts_data = sector_data.pop("concepts", {})
     valuation_section = ""
     if industry_valuation and (industry_valuation.get("datas") or industry_valuation.get("chunks_info")):
         valuation_section = f"""
@@ -136,12 +137,18 @@ def sector_prompt(
 四、行业财务概况（同花顺问财）:
 {json.dumps(industry_finance, ensure_ascii=False, indent=2)}
 """
+    concepts_section = ""
+    if concepts_data and concepts_data.get("datas"):
+        concepts_section = f"""
+五、个股所属概念板块（同花顺问财，每条含指数简称、涨跌幅、成份股数量）:
+{json.dumps(concepts_data, ensure_ascii=False, indent=2)}
+"""
     return [
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股板块分析师。根据个股所属板块的基本数据、行业估值指标（PE/PB/ROE等）、"
-                "主力资金流向和行业财务概况（营收增速、净利润增速、毛利率等），"
+                "你是一名专业的 A 股板块分析师。根据个股所属行业板块、行业估值指标（PE/PB/ROE等）、"
+                "主力资金流向、行业财务概况，以及个股所属概念板块的实时涨跌幅和成份股规模，"
                 "全面分析板块走势、个股在板块中的相对强弱、板块轮动趋势，给出结构化的 JSON 分析结果。"
             ),
         },
@@ -151,9 +158,9 @@ def sector_prompt(
 
 股票: {stock_name}({stock_code})
 
-一、板块基础数据:
+一、行业板块基础数据（行业名称等基本信息）:
 {json.dumps(sector_data, ensure_ascii=False, indent=2)}
-{valuation_section}{market_section}{finance_section}
+{valuation_section}{market_section}{finance_section}{concepts_section}
 请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "sector_name": "<所属行业板块名称>",
@@ -162,12 +169,12 @@ def sector_prompt(
   "sector_rotation_signal": "<流入|流出|稳定>",
   "industry_rank": "<行业在全市场的排名位置描述，如 '前10%' 或 '中游偏上'>",
   "related_concepts": [
-    {{"name": "<概念板块名>", "activity": "<活跃|一般|冷淡>"}}
+    {{"name": "<概念板块名（取自第五部分数据）>", "activity": "<活跃|一般|冷淡，根据涨跌幅判断：>2%活跃、0-2%一般、<0冷淡>"}}
   ],
   "top_peers": [
     {{"name": "<同行股票名>", "code": "<股票代码>", "change_pct": <涨跌幅>}}
   ],
-  "analysis": "<板块联动分析总结，3-5句话，综合板块走势、估值水平、资金流向和行业财务做出判断>"
+  "analysis": "<板块联动分析总结，3-5句话，综合行业板块走势、估值水平、资金流向、行业财务和概念板块活跃度做出判断>"
 }}""",
         },
     ]
@@ -190,26 +197,27 @@ def macro_prompt(
     market_section = ""
     if any(v for v in market_data.values() if isinstance(v, dict) and v.get("datas")):
         market_section = f"""
-市场行情数据（同花顺问财）:
+市场行情数据（含上证指数、北向资金净买入Top10、涨跌停家数统计）:
 {json.dumps(market_data, ensure_ascii=False, indent=2)}
 """
     hithink_section = ""
     if hithink_macro:
         hithink_section = f"""
-宏观经济指标（同花顺问财）:
+宏观经济指标（含 CPI/PPI/PMI 独立查询 + LPR/M2/社融）:
 {json.dumps(hithink_macro, ensure_ascii=False, indent=2)}
 """
     index_section = ""
     if hithink_index and (hithink_index.get("datas") or hithink_index.get("chunks_info")):
         index_section = f"""
-主要指数实时行情（同花顺问财）:
+主要指数实时行情（上证指数、沪深300、创业板指，含收盘价、涨跌幅、成交额）:
 {json.dumps(hithink_index, ensure_ascii=False, indent=2)}
 """
     return [
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股宏观环境分析师。根据大盘指数、资金流向和宏观经济指标（CPI/PPI/PMI/LPR/M2等），"
+                "你是一名专业的 A 股宏观环境分析师。根据大盘指数、北向资金净买入排行、涨跌停家数、"
+                "宏观经济指标（CPI/PPI/PMI 各自独立查询、LPR/M2/社融等），"
                 "判断当前市场阶段和风险等级，给出结构化的 JSON 分析结果。"
             ),
         },

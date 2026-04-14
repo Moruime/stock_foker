@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Card, Tag, List, Typography, Spin, Alert, Button, Empty, Space, Tooltip, Tabs, Table, Descriptions, Divider } from 'antd';
+import { Card, Tag, List, Typography, Spin, Alert, Button, Empty, Space, Tooltip, Tabs, Table, Descriptions, Divider, App } from 'antd';
 import {
   ReloadOutlined,
   SmileOutlined,
@@ -68,6 +68,7 @@ function formatCacheTime(isoStr: string): string {
 }
 
 export default function SentimentPage() {
+  const { modal } = App.useApp();
   const { focus } = useOutletContext<{ focus: FocusStock | null }>();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AgentResult | null>(null);
@@ -83,6 +84,7 @@ export default function SentimentPage() {
   const basicinfoDS = useDataSource(focus?.stock_code, focus?.stock_name, 'basicinfo');
   const businessDS = useDataSource(focus?.stock_code, focus?.stock_name, 'business');
   const shareholdersDS = useDataSource(focus?.stock_code, focus?.stock_name, 'shareholders');
+  const eventsDS = useDataSource(focus?.stock_code, focus?.stock_name, 'hithink_events');
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     if (!focus) return;
@@ -124,7 +126,8 @@ export default function SentimentPage() {
     basicinfoDS.refresh();
     businessDS.refresh();
     shareholdersDS.refresh();
-  }, [focus, invalidateStock, fetchData, hithinkNews, announcements, reportsDS, basicinfoDS, businessDS, shareholdersDS]);
+    eventsDS.refresh();
+  }, [focus, invalidateStock, fetchData, hithinkNews, announcements, reportsDS, basicinfoDS, businessDS, shareholdersDS, eventsDS]);
 
   useEffect(() => {
     fetchData();
@@ -156,6 +159,7 @@ export default function SentimentPage() {
     COLORS.stockFlat;
 
   // --- 派生数据 ---
+  const eventRows = (eventsDS.data?.datas as Record<string, unknown>[]) || [];
   const reportsList = sortByTimeDesc((reportsDS.data?.data as Record<string, unknown>[]) || []);
   const basicinfoRow = ((basicinfoDS.data?.datas as Record<string, unknown>[]) || [])[0] || {};
   const businessRows = (businessDS.data?.datas as Record<string, unknown>[]) || [];
@@ -278,6 +282,10 @@ export default function SentimentPage() {
                   <Title level={4} style={{ margin: 0 }}>{announcementsList.length}</Title>
                 </div>
                 <div style={{ textAlign: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>业绩预告</Text>
+                  <Title level={4} style={{ margin: 0 }}>{eventRows.length}</Title>
+                </div>
+                <div style={{ textAlign: 'center' }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>研报</Text>
                   <Title level={4} style={{ margin: 0 }}>{reportsList.length}</Title>
                 </div>
@@ -331,6 +339,109 @@ export default function SentimentPage() {
                     )}
                   />
                 ) : <Empty description="暂无 AI 重点新闻" />,
+              },
+              {
+                key: 'events',
+                label: tabLabel('业绩预告', eventRows.length, eventsDS.loading, () => eventsDS.refresh()),
+                children: eventsDS.loading
+                  ? <Spin size="small" style={{ display: 'block', margin: '16px auto' }} />
+                  : eventRows.length > 0 ? (
+                    <Table
+                      size="small"
+                      dataSource={eventRows.map((r, i) => ({ ...r, key: i }))}
+                      columns={[
+                        {
+                          title: '报告期',
+                          key: 'period',
+                          width: 100,
+                          render: (_: unknown, row: Record<string, unknown>) =>
+                            (findVal(row, '报告期') as string) || '--',
+                        },
+                        {
+                          title: '公告日期',
+                          key: 'pub_date',
+                          width: 100,
+                          render: (_: unknown, row: Record<string, unknown>) => {
+                            const v = (findVal(row, '公告日期') as string) || '';
+                            if (!v) return '--';
+                            // 20260119 → 2026-01-19
+                            return v.length === 8 ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6)}` : v;
+                          },
+                        },
+                        {
+                          title: '变动类型',
+                          key: 'type',
+                          width: 80,
+                          render: (_: unknown, row: Record<string, unknown>) => {
+                            const v = (findVal(row, '变动类型') as string) || '--';
+                            const isPositive = /预增|略增|扭亏|续盈/.test(v);
+                            const isNegative = /预减|略减|首亏|续亏|减亏/.test(v);
+                            return <Tag color={isPositive ? 'red' : isNegative ? 'green' : 'default'}>{v}</Tag>;
+                          },
+                        },
+                        {
+                          title: '预计净利润',
+                          key: 'profit',
+                          width: 180,
+                          render: (_: unknown, row: Record<string, unknown>) => {
+                            const lo = findVal(row, '预告净利润下限') as number | null;
+                            const hi = findVal(row, '预告净利润上限') as number | null;
+                            const mid = findVal(row, '预告净利润中值') as number | null;
+                            const fmtYi = (n: number) => {
+                              const yi = n / 1e8;
+                              return <Text style={{ color: yi >= 0 ? COLORS.stockUp : COLORS.stockDown }}>{yi.toFixed(2)}亿</Text>;
+                            };
+                            if (lo != null && hi != null) return <span>{fmtYi(lo)} ~ {fmtYi(hi)}</span>;
+                            if (mid != null) return fmtYi(mid);
+                            if (lo != null) return fmtYi(lo);
+                            if (hi != null) return fmtYi(hi);
+                            return '--';
+                          },
+                        },
+                        {
+                          title: '净利润增率',
+                          key: 'change',
+                          width: 120,
+                          render: (_: unknown, row: Record<string, unknown>) => {
+                            const lo = findVal(row, '净利润增长率下限') as number | null;
+                            const hi = findVal(row, '净利润增长率上限') as number | null;
+                            const fmtPct = (v: number) => (
+                              <Text style={{ color: v > 0 ? COLORS.stockUp : v < 0 ? COLORS.stockDown : COLORS.stockFlat }}>
+                                {v > 0 ? '+' : ''}{v.toFixed(1)}%
+                              </Text>
+                            );
+                            if (lo != null && hi != null) return <span>{fmtPct(lo)} ~ {fmtPct(hi)}</span>;
+                            if (lo != null) return fmtPct(lo);
+                            if (hi != null) return fmtPct(hi);
+                            return '--';
+                          },
+                        },
+                        {
+                          title: '变动原因',
+                          key: 'reason',
+                          width: 120,
+                          render: (_: unknown, row: Record<string, unknown>) => {
+                            const reason = (findVal(row, '变动原因') as string) || '';
+                            if (!reason) return '--';
+                            return (
+                              <a
+                                onClick={() => modal.info({
+                                  title: `${(row['股票简称'] as string) || ''} 变动原因`,
+                                  content: <div style={{ maxHeight: 400, overflow: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{reason}</div>,
+                                  width: 600,
+                                  maskClosable: true,
+                                })}
+                                style={{ color: COLORS.primary, cursor: 'pointer' }}
+                              >
+                                {reason.length > 20 ? reason.slice(0, 20) + '...' : reason}
+                              </a>
+                            );
+                          },
+                        },
+                      ]}
+                      pagination={false}
+                    />
+                  ) : <Empty description="暂无业绩预告数据" />,
               },
               {
                 key: 'hithink_news',

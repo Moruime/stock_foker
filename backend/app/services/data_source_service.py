@@ -27,6 +27,10 @@ from app.services.data_fetcher import (
     fetch_hithink_business_data,
     fetch_hithink_shareholders,
     fetch_concept_boards,
+    fetch_north_flow,
+    fetch_market_overview,
+    fetch_hithink_macro_indicators,
+    fetch_hithink_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +54,10 @@ _SOURCE_REGISTRY: dict[str, tuple[Callable[..., dict], bool]] = {
     "business":             (fetch_hithink_business_data, True),
     "shareholders":         (fetch_hithink_shareholders, True),
     "concept_boards":       (fetch_concept_boards, True),
+    "north_flow":           (fetch_north_flow, False),
+    "market_overview":      (fetch_market_overview, False),
+    "hithink_macro":        (fetch_hithink_macro_indicators, False),
+    "hithink_events":       (fetch_hithink_events, True),
 }
 
 VALID_SOURCE_TYPES = set(_SOURCE_REGISTRY.keys())

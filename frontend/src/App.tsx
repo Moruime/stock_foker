@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { darkThemeConfig } from './theme';
 import { AgentCacheProvider } from './contexts/AgentCacheContext';
@@ -15,6 +15,7 @@ import SettingsPage from './pages/SettingsPage';
 function App() {
   return (
     <ConfigProvider locale={zhCN} theme={darkThemeConfig}>
+      <AntApp>
       <AgentCacheProvider>
         <BrowserRouter>
           <Routes>
@@ -31,6 +32,7 @@ function App() {
           </Routes>
         </BrowserRouter>
       </AgentCacheProvider>
+      </AntApp>
     </ConfigProvider>
   );
 }

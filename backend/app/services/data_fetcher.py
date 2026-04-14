@@ -131,8 +131,8 @@ def fetch_hithink_macro_indicators() -> dict:
     拆分为独立查询避免问财 API 多指标合并时丢数据。
     """
     queries = [
-        ("cpi", "最近一期CPI同比增速"),
-        ("ppi", "最近一期PPI同比增速"),
+        ("cpi", "中国CPI当月同比最新值"),
+        ("ppi", "最新月度PPI当月同比"),
         ("pmi", "最近一期制造业PMI"),
         ("monetary", "最新LPR利率 M2同比增速 社融数据"),
     ]
@@ -333,10 +333,10 @@ def fetch_index_data() -> dict:
 
 
 def fetch_north_flow() -> dict:
-    """获取北向资金最新数据（同花顺问财）。
+    """获取主力资金流向 Top10（同花顺问财）。
 
-    问财 API 北向资金查询返回个股维度数据而非汇总，
-    改用北向资金净买入额排名获取最活跃的北向标的。
+    问财 API 对北向资金查询返回的实际是主力资金流向数据，
+    字段名为「主力资金流向[日期]」，单位为元。
     """
     return _call_hithink_api(
         "今日北向资金净买入额前10 净买入额 涨跌幅", limit=10
