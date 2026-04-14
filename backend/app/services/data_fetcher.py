@@ -126,9 +126,14 @@ def parallel_fetch(tasks: dict[str, tuple[Callable, tuple]]) -> dict[str, Any]:
 
 
 def fetch_hithink_macro_indicators() -> dict:
-    """获取宏观经济关键指标（CPI/PPI/PMI/LPR/M2）。"""
+    """获取宏观经济关键指标（CPI/PPI/PMI/LPR/M2）。
+
+    拆分为独立查询避免问财 API 多指标合并时丢数据。
+    """
     queries = [
-        ("price_activity", "最近一期CPI同比增速 PPI同比增速 PMI数据"),
+        ("cpi", "最近一期CPI同比增速"),
+        ("ppi", "最近一期PPI同比增速"),
+        ("pmi", "最近一期制造业PMI"),
         ("monetary", "最新LPR利率 M2同比增速 社融数据"),
     ]
     results = {}
@@ -154,10 +159,16 @@ def fetch_hithink_insresearch_data(stock_name: str) -> dict:
 
 
 def fetch_hithink_events(stock_name: str) -> dict:
-    """获取个股近期重要事件（业绩预告/解禁/减持/增持）。"""
+    """获取个股近期重要事件（业绩预告为主）。
+
+    问财 API 对复合事件查询支持有限，聚焦业绩预告可获取
+    预告类型、预告净利润、摘要等详细字段。
+    """
     if not stock_name:
         return {}
-    return _call_hithink_api(f"{stock_name}近期业绩预告解禁减持增持", limit=5)
+    return _call_hithink_api(
+        f"{stock_name}最新业绩预告 预告类型 预告净利润 变动原因", limit=5
+    )
 
 
 def fetch_hithink_reports(stock_name: str) -> dict:
@@ -218,23 +229,64 @@ def fetch_hithink_announcements(stock_name: str) -> dict:
 # ------------------------------------------------------------------
 
 def fetch_industry_board(stock_name: str) -> dict:
-    """获取个股所属行业板块信息（同花顺问财）。"""
+    """获取个股所属行业板块信息（同花顺问财）。
+
+    简化查询词避免复合条件导致 0 结果。
+    """
     if not stock_name:
         return {}
     return _call_hithink_api(
-        f"{stock_name}所属行业 行业涨跌幅 行业换手率 行业成交额 行业内涨跌幅前5个股",
-        limit=10,
+        f"{stock_name}所属同花顺行业",
+        limit=5,
     )
 
 
 def fetch_concept_boards(stock_name: str) -> dict:
-    """获取个股所属概念板块（含成份股数量用于关联度衡量）。"""
+    """获取个股所属概念板块详情（涨跌幅、成份股数量）。
+
+    问财 API 不支持“个股+概念+涨跌幅+成份股”复合查询（-2058），
+    采用两步策略：先获取概念名称列表，再并行查询各概念板块详情。
+    """
     if not stock_name:
         return {}
-    return _call_hithink_api(
-        f"{stock_name}所属概念板块 涨跌幅 成份股数量",
-        limit=20,
-    )
+    # Step 1: 获取所属概念名称列表
+    base = _call_hithink_api(f"{stock_name}所属概念板块", limit=1)
+    if not base or not base.get("datas"):
+        return base
+    concepts = base["datas"][0].get("所属概念", [])
+    if not concepts:
+        return base
+
+    # Step 2: 并行查询各概念板块的涨跌幅和成份股数量
+    def _query_concept(name: str) -> dict | None:
+        r = _call_hithink_api(
+            f"{name}概念板块涨跌幅 成份股数量", limit=1
+        )
+        if r and r.get("datas"):
+            return r["datas"][0]
+        return None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results: list[dict] = []
+    seen_codes: set[str] = set()
+    with ThreadPoolExecutor(max_workers=min(len(concepts), 8)) as exe:
+        futs = {exe.submit(_query_concept, c): c for c in concepts}
+        for fut in as_completed(futs):
+            try:
+                row = fut.result()
+                if row:
+                    code = row.get("指数代码") or row.get("指数简称", "")
+                    # 过滤仅含代码/简称、无实质数据的记录
+                    has_data = "成份股数量" in row or any(
+                        "涨跌幅" in k for k in row
+                    )
+                    if code and code not in seen_codes and has_data:
+                        seen_codes.add(code)
+                        results.append(row)
+            except Exception:
+                pass
+
+    return {"datas": results, "chunks_info": {}}
 
 
 def fetch_hithink_industry_data(stock_name: str) -> dict:
@@ -281,13 +333,21 @@ def fetch_index_data() -> dict:
 
 
 def fetch_north_flow() -> dict:
-    """获取北向资金最新数据（同花顺问财）。"""
-    return _call_hithink_api("最近一个交易日北向资金净流入沪股通深股通", limit=3)
+    """获取北向资金最新数据（同花顺问财）。
+
+    问财 API 北向资金查询返回个股维度数据而非汇总，
+    改用北向资金净买入额排名获取最活跃的北向标的。
+    """
+    return _call_hithink_api(
+        "今日北向资金净买入额前10 净买入额 涨跌幅", limit=10
+    )
 
 
 def fetch_market_overview() -> dict:
     """获取市场涨跌概况（同花顺问财）。"""
-    return _call_hithink_api("今日A股行业板块涨跌家数 平均涨跌幅 涨幅前5板块", limit=20)
+    return _call_hithink_api(
+        "今日A股上涨家数 下跌家数 涨停家数 跌停家数", limit=5
+    )
 
 
 def fetch_hithink_index_data() -> dict:
