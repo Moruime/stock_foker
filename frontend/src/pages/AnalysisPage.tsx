@@ -15,6 +15,7 @@ import {
   Tooltip,
   Button,
   List,
+  message,
 } from 'antd';
 import { CheckCircleOutlined, QuestionCircleOutlined, RobotOutlined, ReloadOutlined, ClockCircleOutlined, WarningOutlined, LoadingOutlined, ClockCircleFilled } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
@@ -92,6 +93,8 @@ export default function AnalysisPage() {
     return getEnhancedCache(focus.stock_code) !== null;
   });
 
+  const [klineRefreshing, setKlineRefreshing] = useState(false);
+
   useEffect(() => {
     if (!focus) return;
     setLoading(true);
@@ -101,6 +104,25 @@ export default function AnalysisPage() {
       .catch((e) => setError(e.response?.data?.detail || '加载失败'))
       .finally(() => setLoading(false));
   }, [focus, period]);
+
+  const handleKlineRefresh = useCallback(() => {
+    if (!focus || klineRefreshing) return;
+    setKlineRefreshing(true);
+    getStockAnalysis(focus.stock_code, period, undefined, undefined, true)
+      .then((data) => {
+        setAnalysis(data);
+        // 检查最后一条数据是否是今天
+        const last = data.kline_data[data.kline_data.length - 1];
+        const today = new Date().toISOString().slice(0, 10);
+        if (last && last.date < today) {
+          message.warning('远程数据拉取失败，当前K线为缓存数据（请检查网络/代理）');
+        } else {
+          message.success('K线数据已更新');
+        }
+      })
+      .catch(() => { message.error('刷新失败'); })
+      .finally(() => setKlineRefreshing(false));
+  }, [focus, period, klineRefreshing]);
 
   // 对比基准数据
   useEffect(() => {
@@ -576,7 +598,22 @@ export default function AnalysisPage() {
         currentPrice={advice.indicators_summary.current_price}
       />
 
-      <Card title="K线走势与均线" size="small" style={{ marginBottom: 16 }}>
+      <Card
+        title="K线走势与均线"
+        size="small"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Tooltip title="强制刷新当日K线">
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined spin={klineRefreshing} />}
+              onClick={handleKlineRefresh}
+              loading={klineRefreshing}
+            />
+          </Tooltip>
+        }
+      >
         <div style={{ position: 'relative' }}>
           <div ref={wrapperRef} style={{ userSelect: 'none' }}>
             <ReactECharts

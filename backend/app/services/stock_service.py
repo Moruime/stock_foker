@@ -224,6 +224,7 @@ def get_kline_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     db=None,
+    force_refresh: bool = False,
 ) -> list[dict]:
     """获取K线数据，本地缓存优先，缺失部分增量拉取远程
 
@@ -234,13 +235,13 @@ def get_kline_data(
     4. 合并返回
     """
     if db is not None:
-        return _get_kline_with_cache(stock_code, period, db)
+        return _get_kline_with_cache(stock_code, period, db, force_refresh=force_refresh)
 
     # 无 db 时直接走远程（兼容旧调用）
     return _fetch_remote_kline(stock_code, period)
 
 
-def _get_kline_with_cache(stock_code: str, period: str, db) -> list[dict]:
+def _get_kline_with_cache(stock_code: str, period: str, db, *, force_refresh: bool = False) -> list[dict]:
     """带本地缓存的 K 线获取"""
     from app.models.models import KlineCache
 
@@ -276,13 +277,17 @@ def _get_kline_with_cache(stock_code: str, period: str, db) -> list[dict]:
         if days_gap <= 1:
             need_fetch = False
 
-    if not need_fetch and len(cached_data) >= 60:
+    if not force_refresh and not need_fetch and len(cached_data) >= 60:
         return cached_data
 
     # 3. 拉取远程数据
+    remote_failed = False
     try:
         remote_data = _fetch_remote_kline(stock_code, period)
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("远程K线拉取失败: %s", exc)
+        remote_failed = True
         # 远程失败但有缓存，用缓存
         if cached_data:
             return cached_data

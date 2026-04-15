@@ -46,10 +46,11 @@ export const getStockAnalysis = (
   period = 'daily',
   startDate?: string,
   endDate?: string,
+  refresh?: boolean,
 ) =>
   api
     .get<StockAnalysis>(`/stocks/${stockCode}/analysis`, {
-      params: { period, start_date: startDate, end_date: endDate },
+      params: { period, start_date: startDate, end_date: endDate, refresh: refresh || undefined },
     })
     .then((r) => r.data);
 

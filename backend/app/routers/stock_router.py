@@ -93,12 +93,13 @@ def get_stock_kline(
     period: str = "daily",
     start_date: str | None = None,
     end_date: str | None = None,
+    refresh: bool = False,
     db: Session = Depends(get_db),
 ):
     """获取K线数据"""
     from app.services.stock_service import get_kline_data
     try:
-        return get_kline_data(stock_code, period, start_date, end_date, db=db)
+        return get_kline_data(stock_code, period, start_date, end_date, db=db, force_refresh=refresh)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -109,6 +110,7 @@ def get_stock_analysis(
     period: str = "daily",
     start_date: str | None = None,
     end_date: str | None = None,
+    refresh: bool = False,
     db: Session = Depends(get_db),
 ):
     """获取完整的股票分析（K线 + 技术指标 + 买卖建议）"""
@@ -116,7 +118,7 @@ def get_stock_analysis(
     from app.services.advice_service import generate_advice
 
     try:
-        kline = get_kline_data(stock_code, period, start_date, end_date, db=db)
+        kline = get_kline_data(stock_code, period, start_date, end_date, db=db, force_refresh=refresh)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
