@@ -6,7 +6,15 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import sector_prompt
-from app.services.data_fetcher import fetch_industry_board, fetch_concept_boards, fetch_hithink_industry_data, fetch_hithink_market_data, fetch_hithink_industry_finance, parallel_fetch
+from app.services.data_fetcher import fetch_industry_board, parallel_fetch
+
+# 缓存数据源
+_SECTOR_SOURCES = [
+    "industry_valuation",
+    "market_data",
+    "industry_finance",
+    "concept_boards",
+]
 
 
 class SectorAgent(BaseAgent):
@@ -23,25 +31,25 @@ class SectorAgent(BaseAgent):
         })
         base_results.setdefault("industry", {})
 
-        # 使用数据源缓存服务获取行业估值、资金流向、行业财务和概念板块
+        # 缓存数据源并行获取
         if db:
-            from app.services.data_source_service import get_data_source
-            industry_val, _, _ = get_data_source(db, stock_code, stock_name, "industry_valuation")
-            market_data, _, _ = get_data_source(db, stock_code, stock_name, "market_data")
-            industry_fin, _, _ = get_data_source(db, stock_code, stock_name, "industry_finance")
-            concepts_data, _, _ = get_data_source(db, stock_code, stock_name, "concept_boards")
+            from app.services.data_source_service import parallel_get_data_sources
+            sources = parallel_get_data_sources(db, stock_code, stock_name, _SECTOR_SOURCES)
         else:
-            industry_val = fetch_hithink_industry_data(stock_name)
-            market_data = fetch_hithink_market_data(stock_name)
-            industry_fin = fetch_hithink_industry_finance(stock_name)
-            concepts_data = fetch_concept_boards(stock_name)
+            from app.services.data_fetcher import fetch_hithink_industry_data, fetch_concept_boards, fetch_hithink_market_data, fetch_hithink_industry_finance
+            sources = parallel_fetch({
+                "industry_valuation": (fetch_hithink_industry_data, (stock_name,)),
+                "market_data": (fetch_hithink_market_data, (stock_name,)),
+                "industry_finance": (fetch_hithink_industry_finance, (stock_name,)),
+                "concept_boards": (fetch_concept_boards, (stock_name,)),
+            })
 
         return {
             **base_results,
-            "concepts": concepts_data,
-            "industry_valuation": industry_val,
-            "market_data": market_data,
-            "industry_finance": industry_fin,
+            "concepts": sources.get("concept_boards", {}),
+            "industry_valuation": sources.get("industry_valuation", {}),
+            "market_data": sources.get("market_data", {}),
+            "industry_finance": sources.get("industry_finance", {}),
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:

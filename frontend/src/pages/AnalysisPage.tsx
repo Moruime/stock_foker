@@ -65,6 +65,7 @@ export default function AnalysisPage() {
   const [analysis, setAnalysis] = useState<StockAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [snapshotKey, setSnapshotKey] = useState(0);
   const { getEnhancedCache, setEnhancedCache, invalidateStock } = useAgentCache();
 
   // 同步读取内存缓存作为初始值，避免页面切换回来时闪烁空态
@@ -133,6 +134,7 @@ export default function AnalysisPage() {
       setAiAnalysis(data);
       setEnhancedCache(focus.stock_code, data);
       setAiFromCache(false);
+      setSnapshotKey((k) => k + 1);
     } catch {
       // 静默失败，用户可重试
     } finally {
@@ -153,6 +155,7 @@ export default function AnalysisPage() {
       const data = await runEnhancedAnalysis(focus.stock_code, focus.stock_name);
       setAiAnalysis(data);
       setEnhancedCache(focus.stock_code, data);
+      setSnapshotKey((k) => k + 1);
     } catch {
       // 静默失败
     } finally {
@@ -770,7 +773,7 @@ export default function AnalysisPage() {
       </Card>
 
       {/* AI 综合分析历史记录 */}
-      {focus && <SnapshotPanel agentType="enhanced_advice" stockCode={focus.stock_code} />}
+      {focus && <SnapshotPanel agentType="enhanced_advice" stockCode={focus.stock_code} refreshKey={snapshotKey} />}
     </div>
   );
 }

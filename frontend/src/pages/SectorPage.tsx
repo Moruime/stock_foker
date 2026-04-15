@@ -21,6 +21,7 @@ export default function SectorPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AgentResult | null>(null);
   const [error, setError] = useState('');
+  const [snapshotKey, setSnapshotKey] = useState(0);
   const [fromCache, setFromCache] = useState(false);
 
   const { getAgentCache, setAgentCache, invalidateStock } = useAgentCache();
@@ -51,6 +52,7 @@ export default function SectorPage() {
       const data = await runSectorAgent(focus.stock_code, focus.stock_name);
       setResult(data);
       setAgentCache(focus.stock_code, 'sector', data);
+      setSnapshotKey((k) => k + 1);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '获取板块分析失败');
     } finally {
@@ -461,7 +463,7 @@ export default function SectorPage() {
           />
         </Card>
       </Space>
-      {focus && <SnapshotPanel agentType="sector" stockCode={focus.stock_code} />}
+      {focus && <SnapshotPanel agentType="sector" stockCode={focus.stock_code} refreshKey={snapshotKey} />}
     </Spin>
   );
 }

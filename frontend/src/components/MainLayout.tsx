@@ -210,7 +210,7 @@ export default function MainLayout() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider theme="dark" width={180}>
+      <Sider theme="dark" width={180} style={{ display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
           <img src="/logo.png" alt="Stock Foker" style={{ width: 32, height: 32 }} />
           <span style={{ fontWeight: 'bold', fontSize: 16, color: COLORS.textPrimary }}>Stock Foker</span>
@@ -221,6 +221,52 @@ export default function MainLayout() {
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
+
+        {/* 关注列表 */}
+        {watchlist.length > 0 && (
+          <div style={{ marginTop: 12, padding: '0 8px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '6px 8px', marginBottom: 4,
+            }}>
+              <StarFilled style={{ color: COLORS.warning, fontSize: 12 }} />
+              <Text style={{ fontSize: 12, color: COLORS.textSecondary }}>关注列表</Text>
+            </div>
+            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+              {watchlist.map((s) => {
+                const isActive = focus?.stock_code === s.stock_code && focus?.is_active !== 0;
+                return (
+                  <div
+                    key={s.stock_code}
+                    onClick={() => handleSwitchStock(s.stock_code)}
+                    style={{
+                      padding: '6px 8px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      marginBottom: 2,
+                      background: isActive ? 'rgba(77,171,247,0.15)' : 'transparent',
+                      borderLeft: isActive ? `2px solid ${COLORS.primary}` : '2px solid transparent',
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: isActive ? COLORS.primary : COLORS.textPrimary, fontWeight: isActive ? 600 : 400 }}>
+                      {s.stock_name}
+                    </div>
+                    <div style={{ fontSize: 11, color: COLORS.textSecondary }}>
+                      {s.stock_code}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </Sider>
       <Layout>
         <Header

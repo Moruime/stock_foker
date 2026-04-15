@@ -40,6 +40,8 @@ export type AgentTypeWithAdvice = 'sentiment' | 'sector' | 'macro' | 'enhanced_a
 interface SnapshotPanelProps {
   agentType: AgentTypeWithAdvice;
   stockCode: string;
+  /** 外部变更时自动刷新日期列表（例如 Agent 运行完成后 +1） */
+  refreshKey?: number;
 }
 
 // ------------------------------------------------------------------ helpers
@@ -298,7 +300,7 @@ const AGENT_LABEL: Record<string, string> = {
   enhanced_advice: 'AI 综合分析',
 };
 
-export default function SnapshotPanel({ agentType, stockCode }: SnapshotPanelProps) {
+export default function SnapshotPanel({ agentType, stockCode, refreshKey }: SnapshotPanelProps) {
   const [dates, setDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [detail, setDetail] = useState<AgentSnapshot | null>(null);
@@ -343,7 +345,7 @@ export default function SnapshotPanel({ agentType, stockCode }: SnapshotPanelPro
 
   useEffect(() => {
     loadDates();
-  }, [loadDates]);
+  }, [loadDates, refreshKey]);
 
   useEffect(() => {
     if (selectedDate) {

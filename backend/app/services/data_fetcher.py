@@ -21,8 +21,54 @@ logger = logging.getLogger(__name__)
 # 同花顺问财 API 通用客户端
 # ------------------------------------------------------------------
 
+# ------------------------------------------------------------------
+# 问财 API 熔断机制：检测到 user limit (403) 后跳过后续调用
+# ------------------------------------------------------------------
+_iwencai_circuit_open = False  # True = 已熔断，跳过所有问财调用
+_iwencai_circuit_reason = ""   # 熔断原因描述
+
+
+def _check_iwencai_403(exc: Exception) -> bool:
+    """判断是否为问财 API 额度耗尽 (HTTP 403 + user limit)，若是则触发熔断。"""
+    global _iwencai_circuit_open, _iwencai_circuit_reason
+    if isinstance(exc, urllib.error.HTTPError) and exc.code == 403:
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            body = ""
+        if "user limit" in body.lower() or "user_limit" in body.lower():
+            _iwencai_circuit_open = True
+            _iwencai_circuit_reason = "问财 API 调用额度已耗尽 (HTTP 403 user limit)"
+            logger.warning("问财 API 熔断: %s", _iwencai_circuit_reason)
+            return True
+        # 其他 403 也触发熔断（可能是 key 失效）
+        _iwencai_circuit_open = True
+        _iwencai_circuit_reason = f"问财 API 返回 403: {body[:200]}"
+        logger.warning("问财 API 熔断: %s", _iwencai_circuit_reason)
+        return True
+    return False
+
+
+def get_iwencai_status() -> dict:
+    """获取问财 API 当前状态，供前端展示。"""
+    return {
+        "available": not _iwencai_circuit_open,
+        "reason": _iwencai_circuit_reason if _iwencai_circuit_open else "",
+    }
+
+
+def reset_iwencai_circuit():
+    """重置问财 API 熔断状态（用于手动恢复或 key 更换后）。"""
+    global _iwencai_circuit_open, _iwencai_circuit_reason
+    _iwencai_circuit_open = False
+    _iwencai_circuit_reason = ""
+    logger.info("问财 API 熔断已重置")
+
+
 def _call_hithink_api(query: str, limit: int = 5) -> dict:
     """调用同花顺问财 API，失败静默返回空 dict。"""
+    if _iwencai_circuit_open:
+        return {}
     try:
         api_key = os.environ.get("IWENCAI_API_KEY", "")
         if not api_key:
@@ -60,12 +106,15 @@ def _call_hithink_api(query: str, limit: int = 5) -> dict:
                 "chunks_info": result.get("chunks_info", {}),
             }
     except Exception as e:
+        _check_iwencai_403(e)
         logger.warning("同花顺问财查询失败(%s): %s", query, e)
     return {}
 
 
 def _call_hithink_search_api(query: str, channels: list[str]) -> dict:
     """调用同花顺问财综合搜索 API（新闻/公告/研报），失败静默返回空 dict。"""
+    if _iwencai_circuit_open:
+        return {}
     try:
         api_key = os.environ.get("IWENCAI_API_KEY", "")
         if not api_key:
@@ -99,6 +148,7 @@ def _call_hithink_search_api(query: str, channels: list[str]) -> dict:
                 "data": result.get("data", []),
             }
     except Exception as e:
+        _check_iwencai_403(e)
         logger.warning("同花顺综合搜索失败(%s, %s): %s", query, channels, e)
     return {}
 

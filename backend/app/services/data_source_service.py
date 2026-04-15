@@ -14,6 +14,8 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.models.models import DataSourceCache
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from app.services.data_fetcher import (
     fetch_hithink_news,
     fetch_hithink_announcements,
@@ -31,6 +33,7 @@ from app.services.data_fetcher import (
     fetch_market_overview,
     fetch_hithink_macro_indicators,
     fetch_hithink_events,
+    fetch_stock_news,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,7 @@ _SOURCE_REGISTRY: dict[str, tuple[Callable[..., dict], bool]] = {
     "market_overview":      (fetch_market_overview, False),
     "hithink_macro":        (fetch_hithink_macro_indicators, False),
     "hithink_events":       (fetch_hithink_events, True),
+    "stock_news":           (fetch_stock_news, True),
 }
 
 VALID_SOURCE_TYPES = set(_SOURCE_REGISTRY.keys())
@@ -166,3 +170,38 @@ def get_data_source_cached_only(
 ) -> tuple[dict, datetime] | None:
     """仅查询缓存，不触发 API 调用。未命中返回 None。"""
     return _get_cached_source(db, stock_code, source_type)
+
+
+def parallel_get_data_sources(
+    db: Session,
+    stock_code: str,
+    stock_name: str,
+    source_types: list[str],
+    force_refresh: bool = False,
+) -> dict[str, dict]:
+    """并行获取多个数据源。每个线程创建独立 DB Session 避免跨线程问题。
+
+    返回 {source_type: data} 字典。
+    """
+    from app.db.database import SessionLocal
+
+    results: dict[str, dict] = {}
+
+    def _fetch_one(source_type: str) -> tuple[str, dict]:
+        thread_db = SessionLocal()
+        try:
+            data, _, _ = get_data_source(thread_db, stock_code, stock_name, source_type, force_refresh)
+            return source_type, data
+        except Exception as exc:
+            logger.warning("并行获取数据源失败 type=%s: %s", source_type, exc)
+            return source_type, {}
+        finally:
+            thread_db.close()
+
+    with ThreadPoolExecutor(max_workers=min(len(source_types), 8)) as executor:
+        futures = {executor.submit(_fetch_one, st): st for st in source_types}
+        for future in as_completed(futures):
+            st, data = future.result()
+            results[st] = data
+
+    return results
