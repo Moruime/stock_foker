@@ -6,7 +6,7 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.llm.prompts import macro_prompt
-from app.services.data_fetcher import fetch_index_data, fetch_north_flow, fetch_market_overview, fetch_hithink_macro_indicators, fetch_hithink_index_data, parallel_fetch
+from app.services.data_fetcher import fetch_index_data
 
 
 class MacroAgent(BaseAgent):
@@ -17,29 +17,36 @@ class MacroAgent(BaseAgent):
         stock_name: str = kwargs.get("stock_name", "")
         db = kwargs.get("db")
 
-        # 非缓存数据源
+        if db:
+            from app.services.data_source_service import parallel_get_data_sources, get_data_source
+            # 4 个全局数据源统一走缓存体系
+            global_key = stock_code or "__GLOBAL__"
+            cached = parallel_get_data_sources(
+                db, global_key, stock_name,
+                ["north_flow", "market_overview", "hithink_macro", "hithink_index"],
+            )
+            # index_data 不在缓存注册表，仍直接调用
+            return {
+                "index_data": fetch_index_data(),
+                "north_flow": cached.get("north_flow", {}),
+                "market_overview": cached.get("market_overview", {}),
+                "hithink_macro": cached.get("hithink_macro", {}),
+                "hithink_index": cached.get("hithink_index", {}),
+            }
+
+        # 无 db 时回退直接调用
+        from app.services.data_fetcher import (
+            fetch_north_flow, fetch_market_overview,
+            fetch_hithink_macro_indicators, fetch_hithink_index_data, parallel_fetch,
+        )
         base_results = parallel_fetch({
             "index_data": (fetch_index_data, ()),
             "north_flow": (fetch_north_flow, ()),
             "market_overview": (fetch_market_overview, ()),
             "hithink_macro": (fetch_hithink_macro_indicators, ()),
+            "hithink_index": (fetch_hithink_index_data, ()),
         })
-        base_results.setdefault("index_data", {})
-        base_results.setdefault("north_flow", {})
-        base_results.setdefault("market_overview", {})
-
-        # 使用数据源缓存服务获取指数行情
-        if db:
-            from app.services.data_source_service import get_data_source
-            # hithink_index 不依赖 stock_code，但用 stock_code 作为缓存 key
-            hithink_index, _, _ = get_data_source(db, stock_code or "__GLOBAL__", stock_name, "hithink_index")
-        else:
-            hithink_index = fetch_hithink_index_data()
-
-        return {
-            **base_results,
-            "hithink_index": hithink_index,
-        }
+        return base_results
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
         return macro_prompt(

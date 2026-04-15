@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Card, Descriptions, Tag, Typography, Spin, Alert, Space, Button, message } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getLLMStatus, reloadLLMConfig } from '../services/api';
+import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, WarningOutlined, ApiOutlined } from '@ant-design/icons';
+import { getLLMStatus, reloadLLMConfig, getIwencaiStatus, resetIwencaiCircuit } from '../services/api';
 import type { LLMStatus } from '../types';
+import type { IwencaiStatus } from '../services/api';
 import { COLORS } from '../theme';
 
 const { Title, Text } = Typography;
@@ -12,6 +13,8 @@ export default function SettingsPage() {
   const [reloading, setReloading] = useState(false);
   const [status, setStatus] = useState<LLMStatus | null>(null);
   const [error, setError] = useState('');
+  const [iwencai, setIwencai] = useState<IwencaiStatus | null>(null);
+  const [iwencaiResetting, setIwencaiResetting] = useState(false);
 
   const fetchStatus = () => {
     setLoading(true);
@@ -21,9 +24,27 @@ export default function SettingsPage() {
       .finally(() => setLoading(false));
   };
 
+  const fetchIwencai = () => {
+    getIwencaiStatus().then(setIwencai).catch(() => {});
+  };
+
   useEffect(() => {
     fetchStatus();
+    fetchIwencai();
   }, []);
+
+  const handleIwencaiReset = async () => {
+    setIwencaiResetting(true);
+    try {
+      const res = await resetIwencaiCircuit();
+      setIwencai(res);
+      message.success(res.available ? '问财 API 熔断已重置，数据源已恢复' : '熔断已重置，但 API 仍不可用');
+    } catch {
+      message.error('重置失败');
+    } finally {
+      setIwencaiResetting(false);
+    }
+  };
 
   const handleReload = async () => {
     setReloading(true);
@@ -104,6 +125,61 @@ export default function SettingsPage() {
           </Card>
         )}
       </Spin>
+
+      {/* 问财 API 状态 */}
+      <Card
+        title={
+          <Space>
+            <ApiOutlined />
+            <span>问财 API 状态</span>
+          </Space>
+        }
+        extra={
+          iwencai && !iwencai.available ? (
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              onClick={handleIwencaiReset}
+              loading={iwencaiResetting}
+              danger
+            >
+              重置熔断
+            </Button>
+          ) : (
+            <Button icon={<ReloadOutlined />} onClick={fetchIwencai}>刷新</Button>
+          )
+        }
+      >
+        {iwencai ? (
+          iwencai.available ? (
+            <Alert
+              type="success"
+              showIcon
+              icon={<CheckCircleOutlined />}
+              message="问财 API 正常"
+              description="query2data 和 comprehensive/search 接口均可用，数据源实时更新。"
+            />
+          ) : (
+            <Alert
+              type="error"
+              showIcon
+              icon={<WarningOutlined />}
+              message="问财 API 已熔断"
+              description={
+                <>
+                  <div>{iwencai.reason}</div>
+                  <div style={{ marginTop: 8, color: COLORS.textSecondary }}>
+                    部分数据源（基本资料、经营数据、股东信息、行业数据等）将使用历史缓存数据，资讯/公告/研报不受影响。
+                    点击「重置熔断」可尝试重新连接。
+                  </div>
+                </>
+              }
+            />
+          )
+        ) : (
+          <Spin size="small" />
+        )}
+      </Card>
 
       <Card title="配置说明" style={{ background: COLORS.bgSurface }}>
         <Typography>

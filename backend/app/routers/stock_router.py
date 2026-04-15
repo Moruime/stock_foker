@@ -139,6 +139,31 @@ def get_stock_analysis(
     }
 
 
+# ==================== 对比基准 ====================
+
+@router.get("/stocks/{stock_code}/benchmark")
+def get_stock_benchmark(
+    stock_code: str,
+    period: str = "daily",
+    days: int = 120,
+    db: Session = Depends(get_db),
+):
+    """获取个股 vs 大盘指数的对比基准数据"""
+    from app.services.stock_service import get_benchmark_comparison
+
+    # 获取股票名称
+    focus = db.query(FocusStock).filter(
+        FocusStock.stock_code == stock_code,
+        FocusStock.is_active == 1,
+    ).first()
+    stock_name = focus.stock_name if focus else stock_code
+
+    try:
+        return get_benchmark_comparison(stock_code, stock_name, period, days, db=db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== 持仓管理 ====================
 
 @router.get("/positions/{stock_code}", response_model=PositionResponse | None)

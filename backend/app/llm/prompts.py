@@ -195,17 +195,34 @@ def macro_prompt(
     hithink_index = macro_data.get("hithink_index", {})
     market_data = {k: v for k, v in macro_data.items() if k not in ("hithink_macro", "hithink_index")}
     market_section = ""
-    if any(v for v in market_data.values() if isinstance(v, dict) and v.get("datas")):
-        market_section = f"""
-市场行情数据（含上证指数、北向资金净买入Top10、涨跌停家数统计）:
-{json.dumps(market_data, ensure_ascii=False, indent=2)}
+    # north_flow 现为 AKShare 汇总级数据，单独拼接
+    north_flow = macro_data.get("north_flow", {})
+    other_market = {k: v for k, v in market_data.items() if k != "north_flow"}
+    if any(v for v in other_market.values() if isinstance(v, dict) and v.get("datas")):
+        market_section += f"""
+市场行情数据（含上证指数、涨跌停家数统计）:
+{json.dumps(other_market, ensure_ascii=False, indent=2)}
+"""
+    if north_flow and north_flow.get("datas"):
+        market_section += f"""
+沪深港通资金流向汇总（北向 = 沪股通+深股通，南向 = 港股通，单位亿元）:
+{json.dumps(north_flow, ensure_ascii=False, indent=2)}
 """
     hithink_section = ""
     if hithink_macro:
+        # 检测数据源：_source == "akshare" 表示问财不可用时的兜底数据
+        macro_source = hithink_macro.pop("_source", "iwencai")
+        source_note = ""
+        if macro_source == "akshare":
+            source_note = (
+                "\n注意：本次宏观数据来自 AKShare 兜底源（东方财富/国家统计局），"
+                "其中社融指标替换为'新增信贷同比'（新增人民币贷款当月同比增长），"
+                "而非社融存量同比，新增信贷是社融的最大分项，趋势方向一致。\n"
+            )
         hithink_section = f"""
 宏观经济指标（含 CPI/PPI/PMI 独立查询 + LPR/M2/社融）:
 {json.dumps(hithink_macro, ensure_ascii=False, indent=2)}
-"""
+{source_note}"""
     index_section = ""
     if hithink_index and (hithink_index.get("datas") or hithink_index.get("chunks_info")):
         index_section = f"""
@@ -216,7 +233,7 @@ def macro_prompt(
         {
             "role": "system",
             "content": (
-                "你是一名专业的 A 股宏观环境分析师。根据大盘指数、北向资金净买入排行、涨跌停家数、"
+                "你是一名专业的 A 股宏观环境分析师。根据大盘指数、沪深港通资金流向、涨跌停家数、"
                 "宏观经济指标（CPI/PPI/PMI 各自独立查询、LPR/M2/社融等），"
                 "判断当前市场阶段和风险等级，给出结构化的 JSON 分析结果。"
             ),

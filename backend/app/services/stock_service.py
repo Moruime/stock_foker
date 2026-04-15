@@ -360,6 +360,104 @@ def _fetch_remote_kline(stock_code: str, period: str) -> list[dict]:
         raise RuntimeError(f"获取K线数据失败: {e}")
 
 
+# ------------------------------------------------------------------
+# 对比基准分析
+# ------------------------------------------------------------------
+
+_BENCHMARKS = [
+    {"code": "000300", "name": "沪深300"},
+    {"code": "000001", "name": "上证指数"},
+]
+
+
+def get_benchmark_comparison(
+    stock_code: str,
+    stock_name: str,
+    period: str = "daily",
+    days: int = 120,
+    db=None,
+) -> dict:
+    """计算个股 vs 大盘指数的归一化涨跌幅对比。
+
+    返回 dates、stock、benchmarks、stats。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # 1. 获取个股 K 线
+    stock_kline = get_kline_data(stock_code, period, db=db)
+
+    # 2. 获取基准指数 K 线
+    bench_klines: list[tuple[dict, list[dict]]] = []
+    for bm in _BENCHMARKS:
+        try:
+            bk = get_kline_data(bm["code"], period, db=db)
+            bench_klines.append((bm, bk))
+        except Exception as e:
+            logger.warning("获取基准 %s K线失败: %s", bm["name"], e)
+
+    if not stock_kline:
+        return {"dates": [], "stock": {}, "benchmarks": [], "stats": {}}
+
+    # 3. 日期对齐：取交集
+    stock_dates = {d["date"]: d["close"] for d in stock_kline}
+    bench_date_maps = []
+    for _, bk in bench_klines:
+        bench_date_maps.append({d["date"]: d["close"] for d in bk})
+
+    # 取所有数据源的日期交集
+    common_dates = set(stock_dates.keys())
+    for bm_map in bench_date_maps:
+        common_dates &= set(bm_map.keys())
+
+    common_dates_sorted = sorted(common_dates)
+    # 截取最近 N 天
+    if len(common_dates_sorted) > days:
+        common_dates_sorted = common_dates_sorted[-days:]
+
+    if len(common_dates_sorted) < 2:
+        return {"dates": [], "stock": {}, "benchmarks": [], "stats": {}}
+
+    # 4. 提取对齐后的收盘价并计算累计涨跌幅
+    def _pct_series(date_map: dict, dates: list[str]) -> tuple[list[float], list[float]]:
+        closes = [date_map[d] for d in dates]
+        base = closes[0]
+        pcts = [round((c / base - 1) * 100, 2) if base else 0 for c in closes]
+        return closes, pcts
+
+    stock_closes, stock_pcts = _pct_series(stock_dates, common_dates_sorted)
+
+    benchmarks_out = []
+    for i, (bm, _) in enumerate(bench_klines):
+        closes, pcts = _pct_series(bench_date_maps[i], common_dates_sorted)
+        benchmarks_out.append({
+            "code": bm["code"],
+            "name": bm["name"],
+            "close": closes,
+            "pct_change": pcts,
+        })
+
+    # 5. 统计指标
+    stock_return = stock_pcts[-1] if stock_pcts else 0
+    stats: dict = {"stock_return": stock_return}
+    for bo in benchmarks_out:
+        ret = bo["pct_change"][-1] if bo["pct_change"] else 0
+        key_prefix = "hs300" if bo["code"] == "000300" else "sh"
+        stats[f"{key_prefix}_return"] = ret
+        stats[f"excess_{key_prefix}"] = round(stock_return - ret, 2)
+
+    return {
+        "dates": common_dates_sorted,
+        "stock": {
+            "name": stock_name,
+            "close": stock_closes,
+            "pct_change": stock_pcts,
+        },
+        "benchmarks": benchmarks_out,
+        "stats": stats,
+    }
+
+
 def calculate_indicators(kline_data: list[dict], time_frame: str = "short") -> dict:
     """计算技术指标"""
     df = pd.DataFrame(kline_data)

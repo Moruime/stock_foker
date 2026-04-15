@@ -146,6 +146,76 @@ export const getCachedEnhancedAnalysis = (stockCode: string) =>
     .get<EnhancedAnalysis>(`/agent/enhanced-analysis/cached/${stockCode}`)
     .then((r) => r.data);
 
+// SSE 流式综合分析
+export type SSEStage =
+  | 'cache_hit'
+  | 'upstream_start'
+  | 'sentiment_done'
+  | 'sector_done'
+  | 'macro_done'
+  | 'enhanced_start'
+  | 'complete';
+
+export interface SSEEvent {
+  stage: SSEStage;
+  data?: Record<string, unknown>;
+}
+
+export function streamEnhancedAnalysis(
+  stockCode: string,
+  stockName: string,
+  onEvent: (evt: SSEEvent) => void,
+  onError?: (err: Error) => void,
+): AbortController {
+  const ctrl = new AbortController();
+
+  fetch('/api/agent/enhanced-analysis-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stock_code: stockCode, stock_name: stockName }),
+    signal: ctrl.signal,
+  })
+    .then(async (resp) => {
+      if (!resp.ok || !resp.body) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        // SSE 事件以双换行分隔
+        const parts = buf.split('\n\n');
+        buf = parts.pop() || '';
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          // 提取 data: 行
+          const dataLine = part
+            .split('\n')
+            .find((l) => l.startsWith('data: '));
+          if (!dataLine) continue;
+          try {
+            const parsed = JSON.parse(dataLine.slice(6)) as SSEEvent;
+            onEvent(parsed);
+          } catch {
+            // 解析失败忽略
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err.name !== 'AbortError') {
+        onError?.(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+
+  return ctrl;
+}
+
 export const getLLMStatus = () =>
   api.get<LLMStatus>('/agent/llm-status').then((r) => r.data);
 
@@ -154,6 +224,46 @@ export const reloadLLMConfig = () =>
 
 export const clearAgentCache = (stockCode: string) =>
   api.delete(`/agent/cache/${stockCode}`).then((r) => r.data);
+
+// --- 问财 API 状态 ---
+export interface IwencaiStatus {
+  available: boolean;
+  reason: string;
+}
+
+export const getIwencaiStatus = () =>
+  api.get<IwencaiStatus>('/agent/iwencai-status').then((r) => r.data);
+
+export const resetIwencaiCircuit = () =>
+  api.post<IwencaiStatus>('/agent/iwencai-reset').then((r) => r.data);
+
+// --- 对比基准 ---
+export interface BenchmarkSeries {
+  code: string;
+  name: string;
+  close: number[];
+  pct_change: number[];
+}
+
+export interface BenchmarkData {
+  dates: string[];
+  stock: { name: string; close: number[]; pct_change: number[] };
+  benchmarks: BenchmarkSeries[];
+  stats: {
+    stock_return: number;
+    hs300_return: number;
+    sh_return: number;
+    excess_hs300: number;
+    excess_sh: number;
+  };
+}
+
+export const getBenchmark = (stockCode: string, period = 'daily', days = 120) =>
+  api
+    .get<BenchmarkData>(`/stocks/${stockCode}/benchmark`, {
+      params: { period, days },
+    })
+    .then((r) => r.data);
 
 // --- Data Source ---
 export interface DataSourceResponse {

@@ -16,11 +16,13 @@ import {
   Button,
   List,
 } from 'antd';
-import { QuestionCircleOutlined, RobotOutlined, ReloadOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, QuestionCircleOutlined, RobotOutlined, ReloadOutlined, ClockCircleOutlined, WarningOutlined, LoadingOutlined, ClockCircleFilled } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
-import { getStockAnalysis, runEnhancedAnalysis, clearAgentCache, getCachedEnhancedAnalysis } from '../services/api';
+import { getStockAnalysis, clearAgentCache, getCachedEnhancedAnalysis, getIwencaiStatus, getBenchmark, streamEnhancedAnalysis } from '../services/api';
+import type { BenchmarkData, SSEEvent } from '../services/api';
 import type { FocusStock, StockAnalysis, EnhancedAnalysis } from '../types';
+import type { IwencaiStatus } from '../services/api';
 import { COLORS, chartDarkOption } from '../theme';
 import { INDICATOR_MAP } from '../constants/indicators';
 import PositionCard from '../components/PositionCard';
@@ -67,6 +69,10 @@ export default function AnalysisPage() {
   const [error, setError] = useState('');
   const [snapshotKey, setSnapshotKey] = useState(0);
   const { getEnhancedCache, setEnhancedCache, invalidateStock } = useAgentCache();
+  const [iwencaiStatus, setIwencaiStatus] = useState<IwencaiStatus | null>(null);
+  const [benchmark, setBenchmark] = useState<BenchmarkData | null>(null);
+  const [benchLoading, setBenchLoading] = useState(false);
+  const [benchDays, setBenchDays] = useState(120);
 
   // 同步读取内存缓存作为初始值，避免页面切换回来时闪烁空态
   const [aiAnalysis, setAiAnalysis] = useState<EnhancedAnalysis | null>(() => {
@@ -74,6 +80,8 @@ export default function AnalysisPage() {
     return getEnhancedCache(focus.stock_code);
   });
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiStages, setAiStages] = useState<Record<string, 'pending' | 'running' | 'done'>>({});
+  const sseAbortRef = useRef<AbortController | null>(null);
   const [aiFromCache, setAiFromCache] = useState(() => {
     if (!focus) return false;
     return getEnhancedCache(focus.stock_code) !== null;
@@ -93,6 +101,16 @@ export default function AnalysisPage() {
       .catch((e) => setError(e.response?.data?.detail || '加载失败'))
       .finally(() => setLoading(false));
   }, [focus, period]);
+
+  // 对比基准数据
+  useEffect(() => {
+    if (!focus) { setBenchmark(null); return; }
+    setBenchLoading(true);
+    getBenchmark(focus.stock_code, 'daily', benchDays)
+      .then(setBenchmark)
+      .catch(() => setBenchmark(null))
+      .finally(() => setBenchLoading(false));
+  }, [focus?.stock_code, benchDays]);
 
   // mount 或切换股票时，自动恢复 AI 分析：优先前端内存缓存，其次查询后端 DB 缓存
   useEffect(() => {
@@ -126,42 +144,75 @@ export default function AnalysisPage() {
       .finally(() => { setAiLoading(false); setAiChecked(true); });
   }, [focus?.stock_code]);
 
-  const handleAiAnalysis = useCallback(async () => {
+  // 问财 API 状态检查
+  useEffect(() => {
+    getIwencaiStatus().then(setIwencaiStatus).catch(() => {});
+  }, []);
+
+  const _STAGE_LABELS: Record<string, string> = {
+    sentiment: '消息面分析',
+    sector: '板块联动分析',
+    macro: '宏观环境分析',
+    enhanced: 'AI 综合建议',
+  };
+
+  const _handleSSEEvent = useCallback((evt: SSEEvent, stockCode: string) => {
+    const stage = evt.stage;
+    if (stage === 'cache_hit' || stage === 'complete') {
+      const result = evt.data as unknown as EnhancedAnalysis;
+      setAiAnalysis(result);
+      setEnhancedCache(stockCode, result);
+      setAiFromCache(stage === 'cache_hit');
+      setAiLoading(false);
+      setAiStages({});
+      setSnapshotKey((k) => k + 1);
+    } else if (stage === 'upstream_start') {
+      const agents = (evt.data as { agents: string[] })?.agents || [];
+      setAiStages((prev) => {
+        const next = { ...prev };
+        for (const a of agents) next[a] = 'running';
+        return next;
+      });
+    } else if (stage === 'sentiment_done' || stage === 'sector_done' || stage === 'macro_done') {
+      const name = stage.replace('_done', '');
+      setAiStages((prev) => ({ ...prev, [name]: 'done' }));
+    } else if (stage === 'enhanced_start') {
+      setAiStages((prev) => ({ ...prev, enhanced: 'running' }));
+    }
+  }, [setEnhancedCache]);
+
+  const handleAiAnalysis = useCallback(() => {
     if (!focus) return;
     setAiLoading(true);
-    try {
-      const data = await runEnhancedAnalysis(focus.stock_code, focus.stock_name);
-      setAiAnalysis(data);
-      setEnhancedCache(focus.stock_code, data);
-      setAiFromCache(false);
-      setSnapshotKey((k) => k + 1);
-    } catch {
-      // 静默失败，用户可重试
-    } finally {
-      setAiLoading(false);
-    }
-  }, [focus, setEnhancedCache]);
+    setAiStages({ sentiment: 'pending', sector: 'pending', macro: 'pending', enhanced: 'pending' });
+    sseAbortRef.current?.abort();
+    const ctrl = streamEnhancedAnalysis(
+      focus.stock_code,
+      focus.stock_name,
+      (evt) => _handleSSEEvent(evt, focus.stock_code),
+      () => setAiLoading(false),
+    );
+    sseAbortRef.current = ctrl;
+  }, [focus, _handleSSEEvent]);
 
   const handleAiRefresh = useCallback(async () => {
     if (!focus) return;
-    // 先清除后端 DB 缓存和前端内存缓存
     try { await clearAgentCache(focus.stock_code); } catch { /* ignore */ }
     invalidateStock(focus.stock_code);
     invalidateDataSourceCache(focus.stock_code);
     setAiAnalysis(null);
     setAiFromCache(false);
     setAiLoading(true);
-    try {
-      const data = await runEnhancedAnalysis(focus.stock_code, focus.stock_name);
-      setAiAnalysis(data);
-      setEnhancedCache(focus.stock_code, data);
-      setSnapshotKey((k) => k + 1);
-    } catch {
-      // 静默失败
-    } finally {
-      setAiLoading(false);
-    }
-  }, [focus, invalidateStock, setEnhancedCache]);
+    setAiStages({ sentiment: 'pending', sector: 'pending', macro: 'pending', enhanced: 'pending' });
+    sseAbortRef.current?.abort();
+    const ctrl = streamEnhancedAnalysis(
+      focus.stock_code,
+      focus.stock_name,
+      (evt) => _handleSSEEvent(evt, focus.stock_code),
+      () => setAiLoading(false),
+    );
+    sseAbortRef.current = ctrl;
+  }, [focus, invalidateStock, _handleSSEEvent]);
 
   const chartInstance = useRef<ECharts | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -504,6 +555,17 @@ export default function AnalysisPage() {
 
   return (
     <div>
+      {iwencaiStatus && !iwencaiStatus.available && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          message="部分数据源暂不可用"
+          description="问财 API 额度耗尽，基本资料/经营数据/股东信息等将展示历史缓存数据，资讯/公告/研报不受影响。可在「设置」页重置熔断。"
+          closable
+          style={{ marginBottom: 12 }}
+        />
+      )}
       <Space style={{ marginBottom: 16 }}>
         <Segmented options={periodOptions} value={period} onChange={(v) => setPeriod(v as string)} />
       </Space>
@@ -538,6 +600,134 @@ export default function AnalysisPage() {
             />
           </div>
         </div>
+      </Card>
+
+      {/* 对比基准 */}
+      <Card
+        title="对比基准"
+        size="small"
+        style={{ marginBottom: 16 }}
+        loading={benchLoading}
+        extra={
+          <Segmented
+            size="small"
+            options={[
+              { value: 20, label: '近一月' },
+              { value: 60, label: '近三月' },
+              { value: 120, label: '近半年' },
+              { value: 250, label: '近一年' },
+            ]}
+            value={benchDays}
+            onChange={(v) => setBenchDays(v as number)}
+          />
+        }
+      >
+        {benchmark && benchmark.dates.length > 0 ? (
+          <Row gutter={16}>
+            <Col span={18}>
+              <ReactECharts
+                option={{
+                  backgroundColor: chartDarkOption.backgroundColor,
+                  textStyle: chartDarkOption.textStyle,
+                  tooltip: {
+                    trigger: 'axis' as const,
+                    ...chartDarkOption.tooltip,
+                    formatter: (params: { seriesName: string; value: number; color: string }[]) => {
+                      if (!params || params.length === 0) return '';
+                      let html = `<div style="font-size:12px;line-height:1.8">`;
+                      html += `<div style="font-weight:600;margin-bottom:4px">${benchmark.dates[params[0].value !== undefined ? (params[0] as unknown as { dataIndex: number }).dataIndex : 0]}</div>`;
+                      for (const p of params) {
+                        const idx = (p as unknown as { dataIndex: number }).dataIndex;
+                        const val = typeof p.value === 'number' ? p.value : 0;
+                        const color = val >= 0 ? COLORS.stockUp : COLORS.stockDown;
+                        const sign = val >= 0 ? '+' : '';
+                        html += `<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px"></span>${p.seriesName}: <span style="color:${color};float:right;margin-left:12px">${sign}${val.toFixed(2)}%</span></div>`;
+                        void idx;
+                      }
+                      html += `</div>`;
+                      return html;
+                    },
+                  },
+                  legend: {
+                    data: [benchmark.stock.name, ...benchmark.benchmarks.map((b) => b.name)],
+                    ...chartDarkOption.legend,
+                  },
+                  grid: { left: '8%', right: '4%', top: '12%', bottom: '12%' },
+                  xAxis: {
+                    type: 'category' as const,
+                    data: benchmark.dates,
+                    ...chartDarkOption.axisStyles,
+                  },
+                  yAxis: {
+                    type: 'value' as const,
+                    scale: true,
+                    ...chartDarkOption.axisStyles,
+                    axisLabel: { ...((chartDarkOption.axisStyles as Record<string, unknown>).axisLabel as Record<string, unknown> || {}), formatter: '{value}%' },
+                  },
+                  series: [
+                    {
+                      name: benchmark.stock.name,
+                      type: 'line',
+                      data: benchmark.stock.pct_change,
+                      symbol: 'none',
+                      lineStyle: { width: 2, color: '#4dabf7' },
+                      itemStyle: { color: '#4dabf7' },
+                    },
+                    ...benchmark.benchmarks.map((b, i) => ({
+                      name: b.name,
+                      type: 'line' as const,
+                      data: b.pct_change,
+                      symbol: 'none',
+                      lineStyle: { width: 1.5, color: i === 0 ? '#e8b339' : '#888' },
+                      itemStyle: { color: i === 0 ? '#e8b339' : '#888' },
+                    })),
+                  ],
+                }}
+                style={{ height: 300 }}
+              />
+            </Col>
+            <Col span={6}>
+              {(() => {
+                const s = benchmark.stats;
+                const items = [
+                  { label: benchmark.stock.name, value: s.stock_return },
+                  { label: '沪深300', value: s.hs300_return },
+                  { label: '上证指数', value: s.sh_return },
+                ];
+                const excessItems = [
+                  { label: 'vs 沪深300', value: s.excess_hs300 },
+                  { label: 'vs 上证', value: s.excess_sh },
+                ];
+                const fmtPct = (v: number) => {
+                  const sign = v >= 0 ? '+' : '';
+                  const color = v >= 0 ? COLORS.stockUp : COLORS.stockDown;
+                  return <span style={{ color, fontWeight: 600 }}>{sign}{v.toFixed(2)}%</span>;
+                };
+                return (
+                  <div>
+                    <Text strong style={{ display: 'block', marginBottom: 8 }}>区间涨跌幅</Text>
+                    {items.map((it) => (
+                      <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text type="secondary">{it.label}</Text>
+                        {fmtPct(it.value)}
+                      </div>
+                    ))}
+                    <div style={{ borderTop: `1px solid ${COLORS.border}`, margin: '10px 0' }} />
+                    <Text strong style={{ display: 'block', marginBottom: 8 }}>超额收益</Text>
+                    {excessItems.map((it) => (
+                      <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text type="secondary">{it.label}</Text>
+                        {fmtPct(it.value)}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </Col>
+          </Row>
+        ) : (
+          !benchLoading && <Empty description="暂无对比基准数据" />
+        )}
       </Card>
 
       <Row gutter={16}>
@@ -652,7 +842,25 @@ export default function AnalysisPage() {
           )
         }
       >
-        {aiLoading && <Spin tip="AI 分析中，请稍候..." style={{ display: 'block', margin: '24px auto' }} />}
+        {aiLoading && (
+          <div style={{ padding: '16px 0' }}>
+            {Object.entries(aiStages).map(([key, status]) => {
+              const label = _STAGE_LABELS[key] || key;
+              const icon =
+                status === 'done' ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> :
+                status === 'running' ? <LoadingOutlined style={{ color: COLORS.primary }} /> :
+                <ClockCircleFilled style={{ color: COLORS.textMuted }} />;
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 13 }}>
+                  {icon}
+                  <Text style={{ color: status === 'done' ? COLORS.textSecondary : status === 'running' ? COLORS.textPrimary : COLORS.textMuted }}>
+                    {label}
+                  </Text>
+                </div>
+              );
+            })}
+          </div>
+        )}
         
           {/* 过期提示：9点后的旧数据 */}
           {!aiLoading && aiFromCache && aiAnalysis?.enhanced_advice?.timestamp && isStale(aiAnalysis.enhanced_advice.timestamp) && (
@@ -666,7 +874,7 @@ export default function AnalysisPage() {
           )}
 
         {!aiLoading && !aiAnalysis && aiChecked && (
-          <Empty description="点击「开始分析」运行 AI 四维度综合分析" />
+          <Empty description="点击「开始分析」运行 AI 五维度综合分析" />
         )}
 
         {!aiLoading && aiAnalysis && (() => {

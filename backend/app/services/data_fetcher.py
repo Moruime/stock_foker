@@ -175,10 +175,97 @@ def parallel_fetch(tasks: dict[str, tuple[Callable, tuple]]) -> dict[str, Any]:
     return results
 
 
-def fetch_hithink_macro_indicators() -> dict:
-    """获取宏观经济关键指标（CPI/PPI/PMI/LPR/M2）。
+def _akshare_macro_fallback() -> dict:
+    """AKShare 宏观指标兜底（问财不可用时）。使用东方财富数据源。"""
+    import akshare as ak
+    import re
 
-    拆分为独立查询避免问财 API 多指标合并时丢数据。
+    def _to_datas(value: float | None, time_str: str, label: str = "") -> dict:
+        if value is None:
+            return {}
+        return {"datas": [{"指标": label, "指标值": value, "时间": time_str}]}
+
+    def _parse_month(month_str: str) -> str:
+        """'2026年03月份' → '202603'"""
+        m = re.match(r"(\d{4})年(\d{2})月", str(month_str))
+        return f"{m.group(1)}{m.group(2)}" if m else ""
+
+    results: dict = {}
+    # CPI 同比（东方财富/国家统计局）
+    try:
+        df = ak.macro_china_cpi()
+        if df is not None and not df.empty:
+            row = df.iloc[0]  # 最新在第一行
+            results["cpi"] = _to_datas(
+                float(row["全国-同比增长"]), _parse_month(row["月份"]),
+                "CPI同比",
+            )
+    except Exception:
+        pass
+    # PPI 同比
+    try:
+        df = ak.macro_china_ppi()
+        if df is not None and not df.empty:
+            row = df.iloc[0]
+            results["ppi"] = _to_datas(
+                float(row["当月同比增长"]), _parse_month(row["月份"]),
+                "PPI同比",
+            )
+    except Exception:
+        pass
+    # PMI 制造业
+    try:
+        df = ak.macro_china_pmi()
+        if df is not None and not df.empty:
+            row = df.iloc[0]
+            results["pmi"] = _to_datas(
+                float(row["制造业-指数"]), _parse_month(row["月份"]),
+                "制造业PMI",
+            )
+    except Exception:
+        pass
+    # LPR 1Y
+    try:
+        df = ak.macro_china_lpr()
+        if df is not None and not df.empty:
+            row = df.iloc[-1]
+            d = str(row.get("TRADE_DATE", ""))[:10].replace("-", "")
+            results["lpr"] = _to_datas(float(row.get("LPR1Y", 0)), d[:6], "LPR(1Y)")
+    except Exception:
+        pass
+    # M2 同比
+    try:
+        df = ak.macro_china_money_supply()
+        if df is not None and not df.empty:
+            row = df.iloc[0]
+            results["m2"] = _to_datas(
+                float(row["货币和准货币(M2)-同比增长"]), _parse_month(row["月份"]),
+                "M2同比",
+            )
+    except Exception:
+        pass
+    # 新增信贷同比（macro_china_new_financial_credit，数据更及时）
+    try:
+        df = ak.macro_china_new_financial_credit()
+        if df is not None and not df.empty:
+            row = df.iloc[0]  # 最新在第一行
+            yoy = row.get("当月-同比增长")
+            if yoy is not None:
+                results["shibor"] = _to_datas(
+                    round(float(yoy), 1), _parse_month(row["月份"]),
+                    "新增信贷同比",
+                )
+    except Exception:
+        pass
+    # 标记数据源
+    results["_source"] = "akshare"
+    return results
+
+
+def fetch_hithink_macro_indicators() -> dict:
+    """获取宏观经济关键指标（CPI/PPI/PMI/LPR/M2/社融）。
+
+    优先问财 API，熔断时回退 AKShare。
     """
     queries = [
         ("cpi", "中国CPI当月同比最新值"),
@@ -193,6 +280,10 @@ def fetch_hithink_macro_indicators() -> dict:
         data = _call_hithink_api(q, limit=5)
         if data:
             results[key] = data
+    # 问财全部失败 → AKShare 兜底
+    if not results:
+        logger.info("问财宏观指标全部失败，回退 AKShare")
+        results = _akshare_macro_fallback()
     return results
 
 
@@ -385,23 +476,114 @@ def fetch_index_data() -> dict:
 
 
 def fetch_north_flow() -> dict:
-    """获取主力资金流向 Top10（同花顺问财）。
+    """获取沪深港通北向资金流向汇总（AKShare / 东方财富）。
 
-    问财 API 对北向资金查询返回的实际是主力资金流向数据，
-    字段名为「主力资金流向[日期]」，单位为元。
+    返回格式与问财兼容的 dict，包含 datas 列表。
+    2024-08 起北向个股明细停披露，仅有汇总级数据。
     """
-    return _call_hithink_api(
-        "今日北向资金净买入额前10 净买入额 涨跌幅", limit=10
-    )
+    try:
+        import akshare as ak
+        df = ak.stock_hsgt_fund_flow_summary_em()
+        if df is None or df.empty:
+            return {}
+        records = []
+        for _, row in df.iterrows():
+            direction = str(row.get("资金方向", ""))
+            net_buy = float(row.get("成交净买额", 0))
+            net_flow = float(row.get("资金净流入", 0))
+            # 2024-08 起北向成交净买额/资金净流入不再实时披露，API 返回 0
+            # 用 None 标记未披露，前端显示 '--'
+            trading_status = row.get("交易状态")
+            north_undisclosed = (direction == "北向" and net_buy == 0 and net_flow == 0)
+            record: dict = {
+                "板块": row.get("板块", ""),
+                "方向": direction,
+                "成交净买额(亿)": None if north_undisclosed else round(net_buy, 4),
+                "资金净流入(亿)": None if north_undisclosed else round(net_flow, 4),
+                "交易日": str(row.get("交易日", "")),
+            }
+            # 上涨/下跌/指数 —— 北向和南向都有
+            up = row.get("上涨数")
+            down = row.get("下跌数")
+            if up is not None and not (isinstance(up, float) and up != up):  # skip NaN
+                record["上涨数"] = int(up)
+            if down is not None and not (isinstance(down, float) and down != down):
+                record["下跌数"] = int(down)
+            idx_name = row.get("相关指数", "")
+            if idx_name:
+                record["相关指数"] = idx_name
+            idx_chg = row.get("指数涨跌幅")
+            if idx_chg is not None and not (isinstance(idx_chg, float) and idx_chg != idx_chg):
+                record["指数涨跌幅"] = round(float(idx_chg), 2)
+            records.append(record)
+        return {"datas": records} if records else {}
+    except Exception as e:
+        logger.warning("AKShare 北向资金获取失败: %s", e)
+        return {}
 
 
 def fetch_market_overview() -> dict:
-    """获取市场涨跌概况（同花顺问财）。"""
-    return _call_hithink_api(
+    """获取市场涨跌概况。优先问财，回退 AKShare（乐股）。"""
+    data = _call_hithink_api(
         "今日A股上涨家数 下跌家数 涨停家数 跌停家数", limit=5
     )
+    if data and data.get("datas"):
+        return data
+    # AKShare 兜底
+    try:
+        import akshare as ak
+        df = ak.stock_market_activity_legu()
+        if df is None or df.empty:
+            return {}
+        mapping: dict[str, str] = {}
+        for _, row in df.iterrows():
+            item = str(row.get("item", "")).strip()
+            val = row.get("value")
+            if item == "上涨":
+                mapping["上涨家数"] = int(val) if val is not None else 0
+            elif item == "下跌":
+                mapping["下跌家数"] = int(val) if val is not None else 0
+            elif item == "涨停":
+                mapping["涨停家数"] = int(val) if val is not None else 0
+            elif item == "跌停":
+                mapping["跌停家数"] = int(val) if val is not None else 0
+        if mapping:
+            logger.info("涨跌概况回退 AKShare（乐股）")
+            return {"datas": [mapping]}
+        return {}
+    except Exception as e:
+        logger.warning("AKShare 涨跌概况获取失败: %s", e)
+        return {}
 
 
 def fetch_hithink_index_data() -> dict:
-    """获取主要指数最新行情（上证/沪深300/创业板指）。"""
-    return _call_hithink_api("上证指数 沪深300 创业板指最新收盘价涨跌幅成交额", limit=5)
+    """获取主要指数最新行情（上证/沪深300/创业板指）。优先问财，回退 AKShare（新浪）。"""
+    data = _call_hithink_api("上证指数 沪深300 创业板指最新收盘价涨跌幅成交额", limit=5)
+    if data and data.get("datas"):
+        return data
+    # AKShare 兜底
+    try:
+        import akshare as ak
+        df = ak.stock_zh_index_spot_sina()
+        if df is None or df.empty:
+            return {}
+        targets = ["上证指数", "沪深300", "创业板指"]
+        records = []
+        for name in targets:
+            row = df[df["名称"] == name]
+            if row.empty:
+                continue
+            r = row.iloc[0]
+            records.append({
+                "指数简称": name,
+                "最新价": round(float(r.get("最新价", 0)), 2),
+                "涨跌幅": round(float(r.get("涨跌幅", 0)), 2),
+                "成交额": float(r.get("成交额", 0)),
+            })
+        if records:
+            logger.info("指数行情回退 AKShare（新浪）")
+            return {"datas": records}
+        return {}
+    except Exception as e:
+        logger.warning("AKShare 指数行情获取失败: %s", e)
+        return {}

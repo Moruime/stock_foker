@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from typing import Generator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db, SessionLocal
@@ -352,6 +355,160 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
         "macro": upstream_results.get("macro", {"agent_name": "macro", "status": "error", "data": {}, "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": "未执行"}),
         "enhanced_advice": enhanced_result,
     }
+
+
+# ------------------------------------------------------------------
+# 综合分析（SSE 流式）
+# ------------------------------------------------------------------
+
+def _sse_event(stage: str, data: dict | None = None) -> str:
+    """构造一条 SSE 事件文本。"""
+    payload = {"stage": stage}
+    if data is not None:
+        payload["data"] = data
+    return f"event: stage\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _sse_error(message: str) -> str:
+    return f"event: error\ndata: {json.dumps({'message': message}, ensure_ascii=False)}\n\n"
+
+
+def _enhanced_analysis_generator(
+    stock_code: str, stock_name: str, db: Session,
+) -> Generator[str, None, None]:
+    """综合分析 SSE generator，每完成一个阶段 yield 一次事件。"""
+
+    # 0. 检查缓存
+    cached_enhanced = _get_cached(db, "enhanced_advice", stock_code)
+    if cached_enhanced:
+        _empty: dict = {
+            "agent_name": "", "status": "success", "data": {},
+            "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": None,
+        }
+        full_result = {
+            "sentiment": _get_cached(db, "sentiment", stock_code) or {**_empty, "agent_name": "sentiment"},
+            "sector": _get_cached(db, "sector", stock_code) or {**_empty, "agent_name": "sector"},
+            "macro": _get_cached(db, "macro", stock_code) or {**_empty, "agent_name": "macro"},
+            "enhanced_advice": cached_enhanced,
+        }
+        yield _sse_event("cache_hit", full_result)
+        return
+
+    # 1. 并行执行上游 Agent
+    upstream_results: dict[str, dict] = {}
+    agents_to_run: dict[str, object] = {}
+
+    for name, cls in [("sentiment", SentimentAgent), ("sector", SectorAgent), ("macro", MacroAgent)]:
+        cached = _get_cached(db, name, stock_code)
+        if cached:
+            upstream_results[name] = cached
+        else:
+            agents_to_run[name] = cls()
+
+    # 已缓存的上游结果直接推送
+    for name, cached in upstream_results.items():
+        yield _sse_event(f"{name}_done", {"result": cached, "from_cache": True})
+
+    # 未缓存的并行跑
+    if agents_to_run:
+        names_to_run = list(agents_to_run.keys())
+        yield _sse_event("upstream_start", {"agents": names_to_run})
+
+        result_queue: queue.Queue[tuple[str, dict | None, str | None]] = queue.Queue()
+
+        def _worker(name: str, agent: object) -> None:
+            try:
+                res = _run_agent_in_thread(agent, stock_code=stock_code, stock_name=stock_name)
+                result_queue.put((name, res, None))
+            except Exception as exc:
+                result_queue.put((name, None, str(exc)))
+
+        with ThreadPoolExecutor(max_workers=3) as exe:
+            for n, ag in agents_to_run.items():
+                exe.submit(_worker, n, ag)
+
+            received = 0
+            while received < len(agents_to_run):
+                name, result, err = result_queue.get()
+                received += 1
+                if err or result is None:
+                    result = {
+                        "agent_name": name, "status": "error", "data": {},
+                        "llm_used": False, "timestamp": datetime.now().isoformat(),
+                        "error_message": err or "未知错误",
+                    }
+                else:
+                    _save_cache(db, result, stock_code)
+                    _save_snapshot(db, result, stock_code)
+                upstream_results[name] = result
+                yield _sse_event(f"{name}_done", {"result": result, "from_cache": False})
+
+    # 2. 准备 K 线 + 指标
+    yield _sse_event("enhanced_start")
+
+    from app.services.stock_service import get_kline_data, calculate_indicators
+    try:
+        kline = get_kline_data(stock_code, "daily", db=db)
+        indicators = calculate_indicators(kline)
+    except Exception as e:
+        logger.warning("获取K线/指标失败: %s", e)
+        kline, indicators = [], {}
+
+    # 3. 运行增强建议 Agent
+    enhanced_result = _run_agent(
+        EnhancedAdviceAgent(),
+        stock_code=stock_code,
+        stock_name=stock_name,
+        kline=kline,
+        indicators=indicators,
+        db=db,
+        sentiment_result=upstream_results.get("sentiment", {}).get("data", {}),
+        sector_result=upstream_results.get("sector", {}).get("data", {}),
+        macro_result=upstream_results.get("macro", {}).get("data", {}),
+    )
+    _save_cache(db, enhanced_result, stock_code)
+    _save_snapshot(db, enhanced_result, stock_code)
+
+    # 4. 完成
+    _err_stub = lambda n: {"agent_name": n, "status": "error", "data": {}, "llm_used": False, "timestamp": datetime.now().isoformat(), "error_message": "未执行"}
+    full_result = {
+        "sentiment": upstream_results.get("sentiment", _err_stub("sentiment")),
+        "sector": upstream_results.get("sector", _err_stub("sector")),
+        "macro": upstream_results.get("macro", _err_stub("macro")),
+        "enhanced_advice": enhanced_result,
+    }
+    yield _sse_event("complete", full_result)
+
+
+@router.post("/enhanced-analysis-stream")
+def run_enhanced_analysis_stream(req: AgentRunRequest, db: Session = Depends(get_db)):
+    """综合 AI 分析（SSE 流式）—— 实时推送每个 Agent 的执行进度。"""
+    return StreamingResponse(
+        _enhanced_analysis_generator(req.stock_code, req.stock_name, db),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ------------------------------------------------------------------
+# 问财 API 状态
+# ------------------------------------------------------------------
+
+@router.get("/iwencai-status")
+def iwencai_status():
+    """获取问财 API 熔断状态。"""
+    from app.services.data_fetcher import get_iwencai_status
+    return get_iwencai_status()
+
+
+@router.post("/iwencai-reset")
+def iwencai_reset():
+    """重置问财 API 熔断状态。"""
+    from app.services.data_fetcher import reset_iwencai_circuit
+    reset_iwencai_circuit()
+    from app.services.data_fetcher import get_iwencai_status
+    return get_iwencai_status()
+
 
 
 # ------------------------------------------------------------------

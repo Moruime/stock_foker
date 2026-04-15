@@ -137,28 +137,39 @@ export default function MacroPage() {
 
   // ---- 宏观指标 ----
   const macroData = (hithinkMacro.data || {}) as Record<string, Record<string, unknown>>;
-  const macroItems: { label: string; value: string; numVal: number; suffix: string; time: string }[] = [];
+  const macroSource = (macroData as Record<string, unknown>)._source as string | undefined;
+  const macroItems: { label: string; value: string; numVal: number; suffix: string; time: string; hint?: string }[] = [];
   // 通用解析：每个子查询返回 {datas: [{指标, 指标值, 时间, ...}]}
-  const macroCategories: { key: string; label: string; isPmi?: boolean; decimals?: number }[] = [
+  const macroCategories: { key: string; label: string; isPmi?: boolean; decimals?: number; isBigNum?: boolean; unit?: string }[] = [
     { key: 'cpi', label: 'CPI同比' },
     { key: 'ppi', label: 'PPI同比' },
     { key: 'pmi', label: '制造业PMI', isPmi: true },
     { key: 'lpr', label: 'LPR(1Y)', decimals: 2 },
     { key: 'm2', label: 'M2同比' },
-    { key: 'shibor', label: '社融同比' },
+    { key: 'shibor', label: '社融/信贷同比' },
   ];
   for (const cat of macroCategories) {
     const row = ((macroData[cat.key]?.datas as Record<string, unknown>[]) || [])[0];
     if (row) {
       const v = (row['指标值'] as number) ?? null;
       const time = (row['时间'] as string) || '';
+      const indicator = (row['指标'] as string) || '';
       if (v !== null) {
+        const displayVal = cat.isBigNum ? Math.round(v).toLocaleString() : v.toFixed(cat.decimals ?? 1);
+        // 社融/信贷指标口径提示
+        let hint: string | undefined;
+        if (cat.key === 'shibor' && indicator.includes('信贷')) {
+          hint = '新增信贷（非社融存量）';
+        } else if (cat.key === 'shibor' && indicator.includes('增量')) {
+          hint = '增量同比（非存量）';
+        }
         macroItems.push({
-          label: cat.label,
-          value: v.toFixed(cat.decimals ?? 1),
+          label: indicator || cat.label,
+          value: displayVal,
           numVal: v,
-          suffix: cat.isPmi ? '' : '%',
+          suffix: cat.isBigNum ? (cat.unit || '') : (cat.isPmi ? '' : '%'),
           time,
+          hint,
         });
       }
     }
@@ -169,54 +180,73 @@ export default function MacroPage() {
     riskLevel === '低' ? COLORS.stockDown :
     COLORS.warning;
 
-  // ---- 北向资金表格列 ----
+  // ---- 沪深港通资金流向表格列 ----
   const northColumns = [
     {
-      title: '#',
-      key: 'idx',
-      width: 36,
-      render: (_: unknown, __: unknown, i: number) => i + 1,
-    },
-    {
-      title: '代码',
-      key: 'code',
+      title: '板块',
+      key: 'board',
       width: 90,
       render: (_: unknown, row: Record<string, unknown>) => {
-        const code = (row['股票代码'] as string) || '';
-        return <Text type="secondary" style={{ fontSize: 12 }}>{code.replace(/\.(SH|SZ)$/, '')}</Text>;
+        const board = (row['板块'] as string) || '';
+        const dir = (row['方向'] as string) || '';
+        return <Text>{board}{dir ? ` (${dir})` : ''}</Text>;
       },
     },
     {
-      title: '股票简称',
-      key: 'name',
-      width: 90,
-      ellipsis: true,
-      render: (_: unknown, row: Record<string, unknown>) =>
-        (row['股票简称'] as string) || '--',
-    },
-    {
-      title: '主力资金流(万)',
-      key: 'amount',
-      width: 110,
+      title: '成交净买额(亿)',
+      key: 'net_buy',
+      width: 120,
       align: 'right' as const,
       render: (_: unknown, row: Record<string, unknown>) => {
-        const v = findNum(row, '主力资金流向');
+        const v = findNum(row, '成交净买额');
         if (v === null) return '--';
-        const wan = v / 1e4; // 元 → 万元
         return (
-          <Text style={{ color: wan > 0 ? COLORS.stockUp : wan < 0 ? COLORS.stockDown : COLORS.stockFlat }}>
-            {wan > 0 ? '+' : ''}{wan.toFixed(0)}
+          <Text style={{ color: v > 0 ? COLORS.stockUp : v < 0 ? COLORS.stockDown : COLORS.stockFlat }}>
+            {v > 0 ? '+' : ''}{v.toFixed(2)}
           </Text>
         );
       },
     },
     {
-      title: '涨跌幅',
-      key: 'change',
-      width: 80,
+      title: '资金净流入(亿)',
+      key: 'net_flow',
+      width: 120,
       align: 'right' as const,
       render: (_: unknown, row: Record<string, unknown>) => {
-        const v = findNum(row, '涨跌幅');
+        const v = findNum(row, '资金净流入');
+        if (v === null) return '--';
+        return (
+          <Text style={{ color: v > 0 ? COLORS.stockUp : v < 0 ? COLORS.stockDown : COLORS.stockFlat }}>
+            {v > 0 ? '+' : ''}{v.toFixed(2)}
+          </Text>
+        );
+      },
+    },
+    {
+      title: '上涨/下跌',
+      key: 'updown',
+      width: 90,
+      align: 'center' as const,
+      render: (_: unknown, row: Record<string, unknown>) => {
+        const up = findNum(row, '上涨数');
+        const down = findNum(row, '下跌数');
+        if (up === null && down === null) return '--';
+        return (
+          <Space size={4}>
+            {up !== null && <Text style={{ color: COLORS.stockUp }}>{up}</Text>}
+            {up !== null && down !== null && <Text type="secondary">/</Text>}
+            {down !== null && <Text style={{ color: COLORS.stockDown }}>{down}</Text>}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '指数涨跌幅',
+      key: 'idx_chg',
+      width: 100,
+      align: 'right' as const,
+      render: (_: unknown, row: Record<string, unknown>) => {
+        const v = findNum(row, '指数涨跌幅');
         if (v === null) return '--';
         return (
           <Text style={{ color: v > 0 ? COLORS.stockUp : v < 0 ? COLORS.stockDown : COLORS.stockFlat }}>
@@ -397,7 +427,14 @@ export default function MacroPage() {
 
         {/* ===== 宏观经济指标 ===== */}
         <Card
-          title={<DsCardTitle title="宏观经济指标" loading={hithinkMacro.loading} timestamp={hithinkMacro.timestamp} />}
+          title={
+            <Space>
+              <DsCardTitle title="宏观经济指标" loading={hithinkMacro.loading} timestamp={hithinkMacro.timestamp} />
+              {macroSource === 'akshare' && (
+                <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>AKShare兜底</Tag>
+              )}
+            </Space>
+          }
           size="small"
           extra={
             <Tooltip title="刷新宏观指标">
@@ -411,9 +448,13 @@ export default function MacroPage() {
             <div style={{ display: 'flex', gap: 0 }}>
               {macroItems.map((item) => {
                 const timeFmt = item.time ? `${item.time.slice(0, 4)}-${item.time.slice(4, 6)}` : '';
+                const tooltipParts: string[] = [];
+                if (timeFmt) tooltipParts.push(`数据期: ${timeFmt}`);
+                if (item.hint) tooltipParts.push(item.hint);
+                const tooltipText = tooltipParts.join(' | ') || undefined;
                 return (
                   <div key={item.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Tooltip title={timeFmt ? `数据期: ${timeFmt}` : undefined}>
+                    <Tooltip title={tooltipText}>
                       <div style={{ textAlign: 'center' }}>
                         <Statistic
                           title={item.label}
@@ -427,6 +468,7 @@ export default function MacroPage() {
                           }}
                         />
                         {timeFmt && <Text type="secondary" style={{ fontSize: 10 }}>{timeFmt}</Text>}
+                        {item.hint && <Text type="warning" style={{ fontSize: 9, color: COLORS.warning }}>{item.hint}</Text>}
                       </div>
                     </Tooltip>
                   </div>
@@ -438,10 +480,10 @@ export default function MacroPage() {
           )}
         </Card>
 
-        {/* ===== 北向资金 Top10 ===== */}
+        {/* ===== 沪深港通资金流向 ===== */}
         {(northRows.length > 0 || northFlow.loading) && (
           <Card
-            title={<DsCardTitle title="主力资金流向 Top10" loading={northFlow.loading} timestamp={northFlow.timestamp} />}
+            title={<DsCardTitle title="沪深港通资金流向" loading={northFlow.loading} timestamp={northFlow.timestamp} />}
             size="small"
             extra={
               <Tooltip title="刷新北向资金">
