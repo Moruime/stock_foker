@@ -263,6 +263,7 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
     """综合 AI 分析 — 并行运行 3 个上游 Agent，再运行增强建议 Agent。"""
     stock_code = req.stock_code
     stock_name = req.stock_name
+    time_frame = req.time_frame
 
     # 0. 先检查 enhanced_advice 整体缓存，命中则直接拼装响应返回
     cached_enhanced = _get_cached(db, "enhanced_advice", stock_code)
@@ -342,6 +343,7 @@ def run_enhanced_analysis(req: AgentRunRequest, db: Session = Depends(get_db)):
         kline=kline,
         indicators=indicators,
         db=db,
+        time_frame=time_frame,
         sentiment_result=upstream_results.get("sentiment", {}).get("data", {}),
         sector_result=upstream_results.get("sector", {}).get("data", {}),
         macro_result=upstream_results.get("macro", {}).get("data", {}),
@@ -374,7 +376,7 @@ def _sse_error(message: str) -> str:
 
 
 def _enhanced_analysis_generator(
-    stock_code: str, stock_name: str, db: Session,
+    stock_code: str, stock_name: str, db: Session, time_frame: str = "short",
 ) -> Generator[str, None, None]:
     """综合分析 SSE generator，每完成一个阶段 yield 一次事件。"""
 
@@ -462,6 +464,7 @@ def _enhanced_analysis_generator(
         kline=kline,
         indicators=indicators,
         db=db,
+        time_frame=time_frame,
         sentiment_result=upstream_results.get("sentiment", {}).get("data", {}),
         sector_result=upstream_results.get("sector", {}).get("data", {}),
         macro_result=upstream_results.get("macro", {}).get("data", {}),
@@ -484,7 +487,7 @@ def _enhanced_analysis_generator(
 def run_enhanced_analysis_stream(req: AgentRunRequest, db: Session = Depends(get_db)):
     """综合 AI 分析（SSE 流式）—— 实时推送每个 Agent 的执行进度。"""
     return StreamingResponse(
-        _enhanced_analysis_generator(req.stock_code, req.stock_name, db),
+        _enhanced_analysis_generator(req.stock_code, req.stock_name, db, req.time_frame),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

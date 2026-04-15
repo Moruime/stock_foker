@@ -176,6 +176,7 @@ class AgentResultResponse(BaseModel):
 class AgentRunRequest(BaseModel):
     stock_code: str
     stock_name: str
+    time_frame: str = "short"  # short / medium / long
 
 
 class EnhancedAnalysisResponse(BaseModel):

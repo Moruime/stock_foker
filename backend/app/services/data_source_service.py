@@ -42,26 +42,31 @@ logger = logging.getLogger(__name__)
 # 数据源注册表
 # ------------------------------------------------------------------
 
-# key: source_type, value: (fetch_fn, needs_stock_name)
+# key: source_type, value: (fetch_fn, needs_stock_name, priority)
 # fetch_fn 签名: (stock_name: str) -> dict  或  () -> dict
-_SOURCE_REGISTRY: dict[str, tuple[Callable[..., dict], bool]] = {
-    "hithink_news":         (fetch_hithink_news, True),
-    "announcements":        (fetch_hithink_announcements, True),
-    "industry_valuation":   (fetch_hithink_industry_data, True),
-    "market_data":          (fetch_hithink_market_data, True),
-    "industry_finance":     (fetch_hithink_industry_finance, True),
-    "industry_peers":       (fetch_hithink_industry_peers, True),
-    "hithink_index":        (fetch_hithink_index_data, False),
-    "reports":              (fetch_hithink_reports, True),
-    "basicinfo":            (fetch_hithink_basicinfo, True),
-    "business":             (fetch_hithink_business_data, True),
-    "shareholders":         (fetch_hithink_shareholders, True),
-    "concept_boards":       (fetch_concept_boards, True),
-    "north_flow":           (fetch_north_flow, False),
-    "market_overview":      (fetch_market_overview, False),
-    "hithink_macro":        (fetch_hithink_macro_indicators, False),
-    "hithink_events":       (fetch_hithink_events, True),
-    "stock_news":           (fetch_stock_news, True),
+# priority: 数值越小越优先执行。综合搜索 API（不易触发熔断）排在前面，
+#           query2data API 排在后面，避免先耗尽额度导致搜索 API 也被连带跳过。
+_SOURCE_REGISTRY: dict[str, tuple[Callable[..., dict], bool, int]] = {
+    # --- 综合搜索 API (comprehensive/search)，优先级 0 ---
+    "hithink_news":         (fetch_hithink_news, True, 0),
+    "announcements":        (fetch_hithink_announcements, True, 0),
+    "reports":              (fetch_hithink_reports, True, 0),
+    # --- AKShare / 兜底数据源，优先级 1 ---
+    "north_flow":           (fetch_north_flow, False, 1),
+    "market_overview":      (fetch_market_overview, False, 1),
+    "hithink_index":        (fetch_hithink_index_data, False, 1),
+    "hithink_macro":        (fetch_hithink_macro_indicators, False, 1),
+    # --- query2data API，优先级 2 ---
+    "stock_news":           (fetch_stock_news, True, 2),
+    "hithink_events":       (fetch_hithink_events, True, 2),
+    "basicinfo":            (fetch_hithink_basicinfo, True, 2),
+    "business":             (fetch_hithink_business_data, True, 2),
+    "shareholders":         (fetch_hithink_shareholders, True, 2),
+    "industry_valuation":   (fetch_hithink_industry_data, True, 2),
+    "market_data":          (fetch_hithink_market_data, True, 2),
+    "industry_finance":     (fetch_hithink_industry_finance, True, 2),
+    "industry_peers":       (fetch_hithink_industry_peers, True, 2),
+    "concept_boards":       (fetch_concept_boards, True, 2),
 }
 
 VALID_SOURCE_TYPES = set(_SOURCE_REGISTRY.keys())
@@ -186,7 +191,7 @@ def get_data_source(
                 return data, ts, True
 
     # 2. 调用 API
-    fetch_fn, needs_name = _SOURCE_REGISTRY[source_type]
+    fetch_fn, needs_name, _priority = _SOURCE_REGISTRY[source_type]
     if needs_name:
         data = fetch_fn(stock_name)
     else:
@@ -207,9 +212,12 @@ def get_data_source(
         )
         return hist_data, hist_ts, True
 
-    # 无任何缓存，返回空数据
-    ts = _save_source_cache(db, stock_code, source_type, data)
-    return data, ts, False
+    # 无任何缓存 — 不写入空记录，避免污染缓存
+    logger.info(
+        "数据源 %s 无有效数据且无历史缓存 stock=%s（跳过缓存写入）",
+        source_type, stock_code,
+    )
+    return data, datetime.now(), False
 
 
 def get_data_source_cached_only(
@@ -247,8 +255,16 @@ def parallel_get_data_sources(
         finally:
             thread_db.close()
 
-    with ThreadPoolExecutor(max_workers=min(len(source_types), 8)) as executor:
-        futures = {executor.submit(_fetch_one, st): st for st in source_types}
+    # 按优先级排序：综合搜索 API (0) > AKShare 兜底 (1) > query2data (2)
+    # ThreadPoolExecutor 按提交顺序分配 worker，优先提交的先执行，
+    # 让不易触发熔断的数据源先跑，减少额度浪费。
+    sorted_types = sorted(
+        source_types,
+        key=lambda st: _SOURCE_REGISTRY.get(st, (None, None, 99))[2],
+    )
+
+    with ThreadPoolExecutor(max_workers=min(len(sorted_types), 8)) as executor:
+        futures = {executor.submit(_fetch_one, st): st for st in sorted_types}
         for future in as_completed(futures):
             st, data = future.result()
             results[st] = data

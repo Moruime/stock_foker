@@ -271,6 +271,7 @@ def enhanced_advice_prompt(
     macro_result: dict,
     profile: dict,
     position: dict | None,
+    time_frame: str = "short",
     fundamental_data: dict | None = None,
     insresearch_data: dict | None = None,
     reports_data: dict | None = None,
@@ -279,6 +280,9 @@ def enhanced_advice_prompt(
     shareholders_data: dict | None = None,
 ) -> list[dict[str, str]]:
     position_info = json.dumps(position, ensure_ascii=False) if position else "无持仓"
+    # 将 time_frame 转换为中文描述
+    _tf_map = {"short": "短线（1-5天）", "medium": "中线（1-4周）", "long": "长线（1个月以上）"}
+    tf_label = _tf_map.get(time_frame, "短线（1-5天）")
     fundamental_section = ""
     if fundamental_data and (fundamental_data.get("datas") or fundamental_data.get("chunks_info")):
         fundamental_section = f"""
@@ -323,6 +327,9 @@ def enhanced_advice_prompt(
             "content": (
                 "你是一名资深 A 股投资顾问。你需要综合技术面、消息面、板块联动、宏观环境、基本面五个维度，"
                 "结合用户的个人交易风格和当前持仓，给出个性化的投资建议。\n"
+                f"重要：用户当前设定的投资周期为「{tf_label}」，"
+                "你必须以此时间框架为核心角度给出建议，"
+                "包括买卖时机、持仓策略、止盈止损等都应符合该周期的操作特点。\n"
                 "要求：\n"
                 "1. 必须综合所有维度进行判断，不能只看单一维度\n"
                 "2. 推理过程要清晰可解释\n"
@@ -350,6 +357,8 @@ def enhanced_advice_prompt(
 
 五、用户炒股画像:
 {json.dumps(profile, ensure_ascii=False, indent=2)}
+
+★ 用户设定的投资周期: {tf_label}（以此为准，忽略画像中推导的时间框架偏好）
 
 六、当前持仓:
 {position_info}

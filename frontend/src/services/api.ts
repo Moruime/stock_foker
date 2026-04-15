@@ -167,13 +167,14 @@ export function streamEnhancedAnalysis(
   stockName: string,
   onEvent: (evt: SSEEvent) => void,
   onError?: (err: Error) => void,
+  timeFrame?: string,
 ): AbortController {
   const ctrl = new AbortController();
 
   fetch('/api/agent/enhanced-analysis-stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stock_code: stockCode, stock_name: stockName }),
+    body: JSON.stringify({ stock_code: stockCode, stock_name: stockName, time_frame: timeFrame || 'short' }),
     signal: ctrl.signal,
   })
     .then(async (resp) => {

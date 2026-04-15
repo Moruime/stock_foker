@@ -83,6 +83,7 @@ class EnhancedAdviceAgent(BaseAgent):
             macro_result=kwargs.get("macro_result", {}),
             profile=raw_data["profile"],
             position=raw_data["position"],
+            time_frame=kwargs.get("time_frame", "short"),
             fundamental_data=raw_data.get("fundamental_data", {}),
             insresearch_data=raw_data.get("insresearch_data", {}),
             reports_data=raw_data.get("reports_data", {}),

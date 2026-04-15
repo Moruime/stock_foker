@@ -213,6 +213,7 @@ export default function AnalysisPage() {
       focus.stock_name,
       (evt) => _handleSSEEvent(evt, focus.stock_code),
       () => setAiLoading(false),
+      focus.time_frame,
     );
     sseAbortRef.current = ctrl;
   }, [focus, _handleSSEEvent]);
@@ -232,6 +233,7 @@ export default function AnalysisPage() {
       focus.stock_name,
       (evt) => _handleSSEEvent(evt, focus.stock_code),
       () => setAiLoading(false),
+      focus.time_frame,
     );
     sseAbortRef.current = ctrl;
   }, [focus, invalidateStock, _handleSSEEvent]);
