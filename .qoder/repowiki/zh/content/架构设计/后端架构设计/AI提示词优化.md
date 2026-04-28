@@ -17,7 +17,9 @@
 - [frontend/src/App.tsx](file://frontend/src/App.tsx)
 - [frontend/src/pages/AnalysisPage.tsx](file://frontend/src/pages/AnalysisPage.tsx)
 - [frontend/src/services/api.ts](file://frontend/src/services/api.ts)
-- [skills/公告搜索/announcement-search/scripts/__main__.py](file://skills/公告搜索/announcement-search/scripts/__main__.py)
+- [frontend/src/types/index.ts](file://frontend/src/types/index.ts)
+- [backend/app/models/schemas.py](file://backend/app/models/schemas.py)
+- [doc/产品设计文档.md](file://doc/产品设计文档.md)
 </cite>
 
 ## 更新摘要
@@ -26,6 +28,7 @@
 - 前端AnalysisPage.tsx中SSE事件处理的增强
 - 新增实时进度指示器和用户反馈机制
 - 更新路由与缓存策略以支持流式分析
+- 新增SSE事件类型和前端事件处理逻辑
 
 ## 目录
 1. [简介](#简介)
@@ -42,7 +45,7 @@
 ## 简介
 本项目围绕"AI提示词优化"展开，通过统一的提示词模板与Agent架构，实现消息面情绪、板块联动、宏观环境与技术面的多维度融合分析，并输出可解释的买卖建议。系统采用前后端分离架构，后端以FastAPI提供REST API，前端基于React+Ant Design构建可视化界面；数据层通过同花顺问财API获取市场与公司相关信息，同时具备缓存与快照能力，确保分析结果的可复现与高效访问。
 
-**更新** 新增流式分析系统，支持实时进度反馈和增强的用户交互体验。
+**更新** 新增流式分析系统，支持实时进度反馈和增强的用户交互体验。系统现在提供SSE（Server-Sent Events）流式传输，用户可以在分析过程中实时看到各个Agent的执行状态和进度。
 
 ## 项目结构
 项目采用分层与功能域划分：
@@ -66,6 +69,7 @@ subgraph "前端"
 FE_App["App.tsx"]
 FE_Page["AnalysisPage.tsx"]
 FE_API["api.ts<br/>SSE事件处理"]
+FE_TYPES["types/index.ts<br/>SSE事件类型定义"]
 end
 subgraph "后端"
 BE_Main["main.py"]
@@ -80,6 +84,7 @@ BE_Client["client.py"]
 BE_Config["config.py"]
 BE_Data["data_fetcher.py"]
 BE_Tech["advice_service.py"]
+BE_Schemas["schemas.py<br/>增强分析响应模型"]
 end
 FE_App --> FE_Page
 FE_Page --> FE_API
@@ -102,11 +107,12 @@ BE_Macro --> BE_Client
 BE_Advance --> BE_Client
 BE_Client --> BE_Config
 BE_Router --> BE_Tech
+BE_Router --> BE_Schemas
 ```
 
 **图表来源**
 - [backend/app/main.py:1-74](file://backend/app/main.py#L1-L74)
-- [backend/app/routers/agent_router.py:1-552](file://backend/app/routers/agent_router.py#L1-L552)
+- [backend/app/routers/agent_router.py:1-555](file://backend/app/routers/agent_router.py#L1-L555)
 - [backend/app/agents/base_agent.py:1-119](file://backend/app/agents/base_agent.py#L1-L119)
 - [backend/app/agents/sentiment_agent.py:1-91](file://backend/app/agents/sentiment_agent.py#L1-L91)
 - [backend/app/agents/sector_agent.py:1-85](file://backend/app/agents/sector_agent.py#L1-L85)
@@ -118,8 +124,10 @@ BE_Router --> BE_Tech
 - [backend/app/services/data_fetcher.py:1-358](file://backend/app/services/data_fetcher.py#L1-L358)
 - [backend/app/services/advice_service.py:1-193](file://backend/app/services/advice_service.py#L1-L193)
 - [frontend/src/App.tsx:1-41](file://frontend/src/App.tsx#L1-L41)
-- [frontend/src/pages/AnalysisPage.tsx:1-988](file://frontend/src/pages/AnalysisPage.tsx#L1-L988)
-- [frontend/src/services/api.ts:1-301](file://frontend/src/services/api.ts#L1-L301)
+- [frontend/src/pages/AnalysisPage.tsx:1-1027](file://frontend/src/pages/AnalysisPage.tsx#L1-L1027)
+- [frontend/src/services/api.ts:1-303](file://frontend/src/services/api.ts#L1-L303)
+- [frontend/src/types/index.ts:143-148](file://frontend/src/types/index.ts#L143-L148)
+- [backend/app/models/schemas.py:182-186](file://backend/app/models/schemas.py#L182-L186)
 
 **章节来源**
 - [backend/app/main.py:1-74](file://backend/app/main.py#L1-L74)
@@ -147,6 +155,7 @@ BE_Router --> BE_Tech
 - **新增** 流式分析系统
   - 后端：_enhanced_analysis_generator()生成器函数，按阶段推送SSE事件
   - 前端：streamEnhancedAnalysis()函数处理SSE事件流，提供实时进度反馈
+  - 类型定义：SSEEvent接口和SSEStage枚举类型
 
 **章节来源**
 - [backend/app/llm/prompts.py:1-366](file://backend/app/llm/prompts.py#L1-L366)
@@ -156,15 +165,16 @@ BE_Router --> BE_Tech
 - [backend/app/agents/macro_agent.py:1-81](file://backend/app/agents/macro_agent.py#L1-L81)
 - [backend/app/agents/enhanced_advice_agent.py:1-129](file://backend/app/agents/enhanced_advice_agent.py#L1-L129)
 - [backend/app/llm/client.py:1-146](file://backend/app/llm/client.py#L1-L146)
-- [backend/app/routers/agent_router.py:360-491](file://backend/app/routers/agent_router.py#L360-L491)
+- [backend/app/routers/agent_router.py:366-493](file://backend/app/routers/agent_router.py#L366-L493)
 - [backend/app/services/data_fetcher.py:1-358](file://backend/app/services/data_fetcher.py#L1-L358)
 - [backend/app/services/advice_service.py:1-193](file://backend/app/services/advice_service.py#L1-L193)
-- [frontend/src/services/api.ts:149-217](file://frontend/src/services/api.ts#L149-L217)
+- [frontend/src/services/api.ts:150-219](file://frontend/src/services/api.ts#L150-L219)
+- [frontend/src/types/index.ts:143-148](file://frontend/src/types/index.ts#L143-L148)
 
 ## 架构总览
 系统采用"前端页面—后端API—数据源"的三层架构。前端负责交互与可视化，后端提供统一的Agent分析能力与缓存策略，数据层通过同花顺问财API获取市场与公司信息。
 
-**更新** 新增流式分析通道，支持实时事件推送与进度反馈。
+**更新** 新增流式分析通道，支持实时事件推送与进度反馈。用户现在可以通过SSE事件流实时看到分析过程的各个阶段，包括缓存命中、上游Agent执行、增强建议生成等。
 
 ```mermaid
 graph TB
@@ -178,11 +188,13 @@ LLM --> Config["LLM配置<br/>config.py"]
 API --> Tech["技术面建议<br/>advice_service.py"]
 UI --> SSE["SSE事件流<br/>实时进度反馈"]
 SSE --> API
+API --> SSE_GEN["_enhanced_analysis_generator<br/>事件生成器"]
+SSE_GEN --> SSE_EVENT["_sse_event/_sse_error<br/>事件构造"]
 ```
 
 **图表来源**
-- [frontend/src/pages/AnalysisPage.tsx:1-988](file://frontend/src/pages/AnalysisPage.tsx#L1-L988)
-- [backend/app/routers/agent_router.py:360-491](file://backend/app/routers/agent_router.py#L360-L491)
+- [frontend/src/pages/AnalysisPage.tsx:1-1027](file://frontend/src/pages/AnalysisPage.tsx#L1-L1027)
+- [backend/app/routers/agent_router.py:366-493](file://backend/app/routers/agent_router.py#L366-L493)
 - [backend/app/agents/base_agent.py:1-119](file://backend/app/agents/base_agent.py#L1-L119)
 - [backend/app/llm/prompts.py:1-366](file://backend/app/llm/prompts.py#L1-L366)
 - [backend/app/llm/client.py:1-146](file://backend/app/llm/client.py#L1-L146)
@@ -360,7 +372,7 @@ SaveSnap2 --> Return["返回综合结果"]
 - [backend/app/routers/agent_router.py:282-354](file://backend/app/routers/agent_router.py#L282-L354)
 
 **章节来源**
-- [backend/app/routers/agent_router.py:1-552](file://backend/app/routers/agent_router.py#L1-L552)
+- [backend/app/routers/agent_router.py:1-555](file://backend/app/routers/agent_router.py#L1-L555)
 
 ### 流式分析系统与SSE事件处理
 **新增** 系统实现了完整的流式分析架构，提供实时进度反馈和增强的用户体验。
@@ -408,14 +420,14 @@ end
 ```
 
 **图表来源**
-- [backend/app/routers/agent_router.py:376-481](file://backend/app/routers/agent_router.py#L376-L481)
-- [frontend/src/services/api.ts:164-217](file://frontend/src/services/api.ts#L164-L217)
-- [frontend/src/pages/AnalysisPage.tsx:159-182](file://frontend/src/pages/AnalysisPage.tsx#L159-L182)
+- [backend/app/routers/agent_router.py:378-483](file://backend/app/routers/agent_router.py#L378-L483)
+- [frontend/src/services/api.ts:165-219](file://frontend/src/services/api.ts#L165-L219)
+- [frontend/src/pages/AnalysisPage.tsx:181-204](file://frontend/src/pages/AnalysisPage.tsx#L181-L204)
 
 **章节来源**
-- [backend/app/routers/agent_router.py:360-491](file://backend/app/routers/agent_router.py#L360-L491)
-- [frontend/src/services/api.ts:149-217](file://frontend/src/services/api.ts#L149-L217)
-- [frontend/src/pages/AnalysisPage.tsx:159-182](file://frontend/src/pages/AnalysisPage.tsx#L159-L182)
+- [backend/app/routers/agent_router.py:366-493](file://backend/app/routers/agent_router.py#L366-L493)
+- [frontend/src/services/api.ts:150-219](file://frontend/src/services/api.ts#L150-L219)
+- [frontend/src/pages/AnalysisPage.tsx:181-204](file://frontend/src/pages/AnalysisPage.tsx#L181-L204)
 
 ### 前端集成与用户体验
 - 页面逻辑
@@ -451,10 +463,10 @@ Page->>Page : 最终结果显示
 - [frontend/src/pages/AnalysisPage.tsx:96-126](file://frontend/src/pages/AnalysisPage.tsx#L96-L126)
 - [frontend/src/pages/AnalysisPage.tsx:128-161](file://frontend/src/pages/AnalysisPage.tsx#L128-L161)
 - [frontend/src/pages/AnalysisPage.tsx:184-196](file://frontend/src/pages/AnalysisPage.tsx#L184-L196)
-- [backend/app/routers/agent_router.py:483-491](file://backend/app/routers/agent_router.py#L483-L491)
+- [backend/app/routers/agent_router.py:486-493](file://backend/app/routers/agent_router.py#L486-L493)
 
 **章节来源**
-- [frontend/src/pages/AnalysisPage.tsx:1-988](file://frontend/src/pages/AnalysisPage.tsx#L1-L988)
+- [frontend/src/pages/AnalysisPage.tsx:1-1027](file://frontend/src/pages/AnalysisPage.tsx#L1-L1027)
 - [frontend/src/App.tsx:1-41](file://frontend/src/App.tsx#L1-L41)
 
 ## 依赖关系分析
@@ -485,6 +497,8 @@ Router["Agent路由"] --> Cache["缓存/快照"]
 Router --> Tech["技术面服务"]
 SSE["SSE流式分析"] --> Router
 SSE --> FE["前端事件处理"]
+FE_TYPES["SSE事件类型"] --> FE
+BE_SCHEMAS["增强分析响应模型"] --> Router
 ```
 
 **图表来源**
@@ -496,9 +510,11 @@ SSE --> FE["前端事件处理"]
 - [backend/app/llm/client.py:1-146](file://backend/app/llm/client.py#L1-L146)
 - [backend/app/llm/config.py:1-36](file://backend/app/llm/config.py#L1-L36)
 - [backend/app/services/data_fetcher.py:1-358](file://backend/app/services/data_fetcher.py#L1-L358)
-- [backend/app/routers/agent_router.py:360-491](file://backend/app/routers/agent_router.py#L360-L491)
+- [backend/app/routers/agent_router.py:366-493](file://backend/app/routers/agent_router.py#L366-L493)
 - [backend/app/services/advice_service.py:1-193](file://backend/app/services/advice_service.py#L1-L193)
-- [frontend/src/services/api.ts:149-217](file://frontend/src/services/api.ts#L149-L217)
+- [frontend/src/services/api.ts:150-219](file://frontend/src/services/api.ts#L150-L219)
+- [frontend/src/types/index.ts:143-148](file://frontend/src/types/index.ts#L143-L148)
+- [backend/app/models/schemas.py:182-186](file://backend/app/models/schemas.py#L182-L186)
 
 **章节来源**
 - [backend/app/services/data_fetcher.py:1-358](file://backend/app/services/data_fetcher.py#L1-L358)
@@ -516,6 +532,7 @@ SSE --> FE["前端事件处理"]
 - **新增** 流式分析性能
   - SSE事件推送减少前端轮询开销，实时反馈分析进度。
   - 事件流式传输，避免大体积响应阻塞。
+  - 前端AbortController支持中断SSE连接，避免内存泄漏。
 
 [本节为通用指导，无需特定文件分析]
 
@@ -533,17 +550,24 @@ SSE --> FE["前端事件处理"]
   - 检查SSE端点是否正确返回text/event-stream类型响应。
   - 确认前端streamEnhancedAnalysis()函数正确处理SSE事件流。
   - 验证事件格式符合SSE标准（event: 和data:行）。
+  - 检查AbortController是否正确清理SSE连接。
+  - 确认前端AI分析状态机正确处理各种事件类型。
 
 **章节来源**
 - [backend/app/llm/client.py:104-126](file://backend/app/llm/client.py#L104-L126)
 - [backend/app/routers/agent_router.py:384-394](file://backend/app/routers/agent_router.py#L384-L394)
 - [backend/app/services/data_fetcher.py:24-64](file://backend/app/services/data_fetcher.py#L24-L64)
-- [frontend/src/services/api.ts:164-217](file://frontend/src/services/api.ts#L164-L217)
+- [frontend/src/services/api.ts:165-219](file://frontend/src/services/api.ts#L165-L219)
 
 ## 结论
 本项目通过标准化提示词模板与Agent架构，实现了消息面、板块、宏观与技术面的多维度融合分析，并以缓存与快照机制保障性能与可复现性。前端提供直观的可视化与交互体验，后端以并行化与容错设计确保稳定性。
 
 **更新** 新增的流式分析系统显著提升了用户体验，通过实时进度反馈和SSE事件推送，用户可以清晰地了解分析过程的各个阶段。系统采用前后端分离架构，后端以FastAPI提供REST API，前端基于React+Ant Design构建可视化界面；数据层通过同花顺问财API获取市场与公司相关信息，同时具备缓存与快照能力，确保分析结果的可复现与高效访问。
+
+系统现在支持三种分析模式：
+1. **传统模式**：一次性返回完整分析结果
+2. **缓存模式**：直接返回缓存结果（如果可用）
+3. **流式模式**：实时推送分析进度事件
 
 建议持续优化提示词模板与Agent降级策略，进一步提升在复杂场景下的鲁棒性与可解释性。流式分析系统的集成为未来的性能优化和用户体验改进奠定了良好基础。
 
@@ -552,6 +576,16 @@ SSE --> FE["前端事件处理"]
 ## 附录
 - 技能工具
   - 公告搜索技能提供命令行工具，支持批量查询与多格式输出，便于离线验证与数据导出。
+- **新增** SSE事件类型参考
+  - cache_hit：缓存命中事件，包含完整的增强分析结果
+  - upstream_start：上游Agent开始事件，包含并行执行的Agent列表
+  - sentiment_done：消息面分析完成事件，包含结果和是否来自缓存的信息
+  - sector_done：板块分析完成事件，包含结果和是否来自缓存的信息
+  - macro_done：宏观分析完成事件，包含结果和是否来自缓存的信息
+  - enhanced_start：增强建议开始事件，表示开始生成综合建议
+  - complete：分析完成事件，包含完整的增强分析结果
 
 **章节来源**
 - [skills/公告搜索/announcement-search/scripts/__main__.py:141-223](file://skills/公告搜索/announcement-search/scripts/__main__.py#L141-L223)
+- [frontend/src/types/index.ts:150-158](file://frontend/src/types/index.ts#L150-L158)
+- [backend/app/models/schemas.py:182-186](file://backend/app/models/schemas.py#L182-L186)
