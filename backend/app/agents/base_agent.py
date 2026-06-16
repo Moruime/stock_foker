@@ -69,7 +69,7 @@ class BaseAgent(ABC):
             if self.llm.is_available():
                 try:
                     messages = self.build_prompt(raw_data=raw_data, **kwargs)
-                    llm_output = self.llm.chat_json(messages)
+                    llm_output = self.llm.chat_json(messages, caller=self.agent_name)
                     parsed = self.parse_response(llm_output, raw_data=raw_data, **kwargs)
                     return AgentResult(
                         agent_name=self.agent_name,

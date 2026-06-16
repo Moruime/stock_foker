@@ -9,3 +9,4 @@ python-dotenv>=1.1
 httpx>=0.28
 python-multipart>=0.0.18
 requests>=2.32
+mcp[cli]>=1.2.0

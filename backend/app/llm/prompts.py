@@ -278,6 +278,7 @@ def enhanced_advice_prompt(
     business_data: dict | None = None,
     basicinfo_data: dict | None = None,
     shareholders_data: dict | None = None,
+    memory_context: str = "",
 ) -> list[dict[str, str]]:
     position_info = json.dumps(position, ensure_ascii=False) if position else "无持仓"
     # 将 time_frame 转换为中文描述
@@ -363,7 +364,7 @@ def enhanced_advice_prompt(
 六、当前持仓:
 {position_info}
 {fundamental_section}{insresearch_section}{reports_section}{business_section}{basicinfo_section}{shareholders_section}
-请以如下 JSON 格式输出（不要输出其他内容）:
+{f"十三、用户记忆与偏好（Memory 系统）:" + chr(10) + memory_context + chr(10) if memory_context else ""}请以如下 JSON 格式输出（不要输出其他内容）:
 {{
   "signal": "<buy|sell|hold>",
   "confidence": <0到1的置信度>,

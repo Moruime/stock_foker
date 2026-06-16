@@ -40,6 +40,8 @@ from app.routers.stock_router import router as stock_router
 from app.routers.agent_router import router as agent_router
 from app.routers.snapshot_router import router as snapshot_router
 from app.routers.data_source_router import router as data_source_router
+from app.routers.token_router import router as token_router
+from app.routers.backtest_router import router as backtest_router
 
 
 @asynccontextmanager
@@ -80,6 +82,8 @@ app.include_router(stock_router)
 app.include_router(agent_router)
 app.include_router(snapshot_router)
 app.include_router(data_source_router)
+app.include_router(token_router)
+app.include_router(backtest_router)
 
 
 @app.get("/")

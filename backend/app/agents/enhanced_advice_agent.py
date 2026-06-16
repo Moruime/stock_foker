@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.base_agent import BaseAgent
+from app.agents.base_agent import BaseAgent, AgentResult
+from app.agents.react_mixin import ReactMixin, is_react_enabled
 from app.llm.prompts import enhanced_advice_prompt
 
 
-class EnhancedAdviceAgent(BaseAgent):
+class EnhancedAdviceAgent(ReactMixin, BaseAgent):
     agent_name = "enhanced_advice"
+
+    def execute(self, **kwargs: Any) -> AgentResult:
+        """执行 Agent，ReAct 启用时走多轮推理。"""
+        if is_react_enabled() and kwargs.get("mcp_client"):
+            return self.execute_react(**kwargs)
+        return super().execute(**kwargs)
 
     def fetch_data(self, **kwargs: Any) -> dict:
         """从 kwargs 获取上游数据（由 router 层预先准备）。"""
@@ -74,6 +81,20 @@ class EnhancedAdviceAgent(BaseAgent):
         }
 
     def build_prompt(self, *, raw_data: dict, **kwargs: Any) -> list[dict[str, str]]:
+        # Memory 注入：检索相关记忆并拼装到 prompt
+        memory_context = ""
+        db = kwargs.get("db")
+        if db:
+            try:
+                from app.memory.memory_manager import MemoryManager
+                mm = MemoryManager(db)
+                memory_context = mm.format_memory_context(
+                    stock_name=kwargs.get("stock_name", ""),
+                    time_frame=kwargs.get("time_frame", "short"),
+                )
+            except Exception:
+                pass  # Memory 不可用不影响主流程
+
         return enhanced_advice_prompt(
             stock_code=kwargs["stock_code"],
             stock_name=kwargs["stock_name"],
@@ -90,6 +111,7 @@ class EnhancedAdviceAgent(BaseAgent):
             business_data=raw_data.get("business_data", {}),
             basicinfo_data=raw_data.get("basicinfo_data", {}),
             shareholders_data=raw_data.get("shareholders_data", {}),
+            memory_context=memory_context,
         )
 
     def parse_response(self, llm_output: dict, *, raw_data: dict, **kwargs: Any) -> dict:

@@ -148,3 +148,48 @@ class StockPosition(Base):
     note = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class LLMUsageLog(Base):
+    """LLM 调用日志 — 记录每次 LLM 调用的 token 消耗与耗时"""
+    __tablename__ = "llm_usage_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    model = Column(String(50), nullable=False, index=True)
+    caller = Column(String(50), nullable=False, index=True)  # agent_name
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    latency_ms = Column(Integer, nullable=False, default=0)
+    cost_yuan = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class TokenBudget(Base):
+    """Token 预算配置"""
+    __tablename__ = "token_budget"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period = Column(String(10), nullable=False)       # daily / monthly
+    budget_tokens = Column(Integer, nullable=False, default=1000000)
+    budget_yuan = Column(Float, nullable=False, default=10.0)
+    alert_threshold = Column(Float, default=0.8)      # 80% 报警
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class BacktestResult(Base):
+    """回测结果"""
+    __tablename__ = "backtest_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    stock_code = Column(String(10), nullable=False, index=True)
+    start_date = Column(String(10))
+    end_date = Column(String(10))
+    total_signals = Column(Integer, default=0)
+    win_rate = Column(Float, default=0.0)
+    avg_return = Column(Float, default=0.0)
+    sharpe_ratio = Column(Float, default=0.0)
+    max_drawdown = Column(Float, default=0.0)
+    accuracy = Column(Float, default=0.0)
+    detail_json = Column(Text)       # 逐笔交易 JSON
+    created_at = Column(DateTime, server_default=func.now())
